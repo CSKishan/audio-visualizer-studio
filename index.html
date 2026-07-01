@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Audio Visualizer Studio</title>
+<style>
+  :root {
+    --panel-bg: #14151a;
+    --panel-bg-2: #1c1e26;
+    --border: #2a2d38;
+    --text: #e7e9ee;
+    --text-dim: #9aa0ad;
+    --accent: #6d5efc;
+    --accent-2: #22d3ee;
+    --danger: #ef4444;
+    --ok: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #07080b;
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+  }
+
+  /* ---------- Stage ---------- */
+  #stageWrap {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #101218, #07080b 70%);
+  }
+  #stage {
+    max-width: 100%; max-height: 100%;
+    background: #000;
+    border-radius: 4px;
+    box-shadow: 0 20px 80px rgba(0,0,0,0.7);
+  }
+
+  /* ---------- Corner controls (excluded from recording) ---------- */
+  .control-btn {
+    position: fixed;
+    z-index: 30;
+    width: 54px; height: 54px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: rgba(20,21,26,0.72);
+    backdrop-filter: blur(8px);
+    color: var(--text);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  }
+  .control-btn:hover { transform: translateY(-2px); background: rgba(34,36,46,0.9); }
+  .control-btn:active { transform: translateY(0); }
+  .control-btn svg { width: 24px; height: 24px; }
+
+  #settingsBtn { top: 20px; right: 20px; }
+  #playBtn { bottom: 22px; left: 50%; transform: translateX(-50%); }
+  #playBtn:hover { transform: translateX(-50%) translateY(-2px); }
+  #recBtn { bottom: 22px; right: 20px; }
+  #recBtn.recording { background: var(--danger); border-color: var(--danger); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(239,68,68,.5);} 50%{ box-shadow:0 0 0 12px rgba(239,68,68,0);} }
+
+  /* REC indicator (excluded from recording) */
+  #recDot {
+    position: fixed; top: 22px; left: 22px; z-index: 30;
+    display: none; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 20px;
+    background: rgba(20,21,26,0.75); backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    font-size: 13px; font-weight: 600; letter-spacing: .04em;
+  }
+  #recDot.show { display: flex; }
+  #recDot .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--danger); animation: blink 1s steps(2,start) infinite; }
+  @keyframes blink { 50% { opacity: 0.15; } }
+
+  /* ---------- Settings panel ---------- */
+  #overlay {
+    position: fixed; inset: 0; z-index: 40;
+    background: rgba(0,0,0,0.5);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease;
+  }
+  #overlay.open { opacity: 1; pointer-events: auto; }
+
+  #panel {
+    position: fixed; top: 0; right: 0; z-index: 50;
+    width: 380px; max-width: 92vw; height: 100%;
+    background: var(--panel-bg);
+    border-left: 1px solid var(--border);
+    transform: translateX(100%);
+    transition: transform .25s cubic-bezier(.4,0,.2,1);
+    display: flex; flex-direction: column;
+    box-shadow: -20px 0 60px rgba(0,0,0,0.5);
+  }
+  #panel.open { transform: translateX(0); }
+
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 20px; border-bottom: 1px solid var(--border);
+  }
+  .panel-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+  .panel-head .close { background: none; border: none; color: var(--text-dim); font-size: 24px; cursor: pointer; line-height: 1; }
+  .panel-head .close:hover { color: var(--text); }
+
+  .panel-body { padding: 16px 20px 40px; overflow-y: auto; flex: 1; }
+  .panel-body::-webkit-scrollbar { width: 8px; }
+  .panel-body::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+
+  .section { margin-bottom: 22px; }
+  .section > label.section-title,
+  .section-title {
+    display: block; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--text-dim);
+    margin-bottom: 9px; font-weight: 600;
+  }
+
+  .file-input { display: none; }
+  .file-label {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px; border-radius: 10px;
+    background: var(--panel-bg-2); border: 1px solid var(--border);
+    cursor: pointer; font-size: 14px; transition: border-color .12s;
+  }
+  .file-label:hover { border-color: var(--accent); }
+  .file-label .name { color: var(--text-dim); font-size: 12px; margin-left: auto; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-label svg { width: 18px; height: 18px; opacity: .8; }
+
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1; padding: 10px; border-radius: 9px;
+    background: var(--panel-bg-2); border: 1px solid var(--border);
+    color: var(--text-dim); cursor: pointer; font-size: 13px; font-weight: 600;
+    transition: all .12s;
+  }
+  .seg button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .seg button:hover:not(.active) { border-color: var(--accent); color: var(--text); }
+
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .swatch {
+    width: 34px; height: 34px; border-radius: 8px;
+    cursor: pointer; border: 2px solid transparent;
+    transition: transform .1s;
+  }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.active { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+
+  .sub-label { font-size: 12px; color: var(--text-dim); margin: 14px 0 8px; }
+
+  .custom-row { display: flex; align-items: center; gap: 10px; }
+  input[type="color"] {
+    width: 42px; height: 34px; padding: 0; border: 1px solid var(--border);
+    border-radius: 8px; background: none; cursor: pointer;
+  }
+  .btn {
+    padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-bg-2); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .switch-row { display: flex; align-items: center; justify-content: space-between; }
+  .switch { position: relative; width: 46px; height: 26px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider-sw { position: absolute; inset: 0; background: #3a3d48; border-radius: 26px; cursor: pointer; transition: .2s; }
+  .slider-sw:before { content: ""; position: absolute; height: 20px; width: 20px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+  .switch input:checked + .slider-sw { background: var(--accent); }
+  .switch input:checked + .slider-sw:before { transform: translateX(20px); }
+
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .range-row { display: flex; align-items: center; gap: 12px; }
+  .range-row .val { font-size: 12px; color: var(--text-dim); min-width: 34px; text-align: right; }
+
+  .hint { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; margin-top: 6px; }
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+  #toast {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--panel-bg-2); border: 1px solid var(--border);
+    padding: 12px 20px; border-radius: 10px; font-size: 13px; z-index: 60;
+    opacity: 0; pointer-events: none; transition: all .25s;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+  <div id="stageWrap">
+    <canvas id="stage" width="1920" height="1080"></canvas>
+  </div>
+
+  <!-- REC indicator (DOM overlay — not captured) -->
+  <div id="recDot"><span class="dot"></span>REC</div>
+
+  <!-- Corner controls (DOM overlays — not captured) -->
+  <button class="control-btn" id="settingsBtn" title="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+
+  <button class="control-btn" id="playBtn" title="Play / Pause">
+    <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+    <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+  </button>
+
+  <button class="control-btn" id="recBtn" title="Record video">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="7"/></svg>
+  </button>
+
+  <!-- Settings panel -->
+  <div id="overlay"></div>
+  <aside id="panel">
+    <div class="panel-head">
+      <h2>Settings</h2>
+      <button class="close" id="closePanel">&times;</button>
+    </div>
+    <div class="panel-body">
+
+      <div class="section">
+        <span class="section-title">Media</span>
+        <label class="file-label" for="audioInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          Audio clip <span class="name" id="audioName">none</span>
+        </label>
+        <input type="file" id="audioInput" class="file-input" accept="audio/*" />
+
+        <label class="file-label" for="bgInput" style="margin-top:8px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          Background image <span class="name" id="bgName">default</span>
+        </label>
+        <input type="file" id="bgInput" class="file-input" accept="image/*" />
+
+        <label class="file-label" for="profileInput" style="margin-top:8px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+          Profile picture <span class="name" id="profileName">default</span>
+        </label>
+        <input type="file" id="profileInput" class="file-input" accept="image/*" />
+      </div>
+
+      <div class="section">
+        <span class="section-title">Background presets</span>
+        <div class="swatches" id="bgPresets"></div>
+        <div class="switch-row" style="margin-top:12px">
+          <span style="font-size:14px">Vignette &amp; dimming</span>
+          <label class="switch"><input type="checkbox" id="vignetteToggle" checked /><span class="slider-sw"></span></label>
+        </div>
+        <p class="hint">Pick a ready-made background, or upload your own above (an upload takes over). Turn off the vignette for a brighter, flat background.</p>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <span class="section-title">Orientation</span>
+        <div class="seg" id="aspectSeg">
+          <button data-aspect="16:9" class="active">16:9 Landscape</button>
+          <button data-aspect="9:16">9:16 Portrait</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <span class="section-title">Circle &amp; position</span>
+
+        <div class="sub-label">Circle size</div>
+        <div class="range-row">
+          <input type="range" id="circleSize" min="0.08" max="0.26" step="0.005" value="0.14" />
+          <span class="val" id="circleSizeVal">14%</span>
+        </div>
+
+        <div class="sub-label">Profile zoom</div>
+        <div class="range-row">
+          <input type="range" id="profileZoom" min="1" max="3" step="0.02" value="1" />
+          <span class="val" id="profileZoomVal">1.0&times;</span>
+        </div>
+        <div class="sub-label">Profile position — horizontal / vertical</div>
+        <div class="range-row">
+          <input type="range" id="profileX" min="-1" max="1" step="0.02" value="0" />
+          <input type="range" id="profileY" min="-1" max="1" step="0.02" value="0" />
+        </div>
+
+        <div class="sub-label">Background zoom</div>
+        <div class="range-row">
+          <input type="range" id="bgZoom" min="1" max="3" step="0.02" value="1" />
+          <span class="val" id="bgZoomVal">1.0&times;</span>
+        </div>
+        <div class="sub-label">Background position — horizontal / vertical</div>
+        <div class="range-row">
+          <input type="range" id="bgX" min="-0.5" max="0.5" step="0.01" value="0" />
+          <input type="range" id="bgY" min="-0.5" max="0.5" step="0.01" value="0" />
+        </div>
+
+        <button class="btn" id="resetPos" style="margin-top:14px">Reset position &amp; size</button>
+        <p class="hint">Background zoom/position apply to an uploaded image (presets fill the whole frame).</p>
+      </div>
+
+      <div class="section">
+        <span class="section-title">Visualizer shape</span>
+        <div class="seg" id="shapeSeg">
+          <button data-shape="bars" class="active">Radial bars</button>
+          <button data-shape="blob">Blob</button>
+          <button data-shape="lines">Curves</button>
+        </div>
+        <div class="switch-row" style="margin-top:12px">
+          <span style="font-size:14px">Rotate visualizer</span>
+          <label class="switch"><input type="checkbox" id="rotateToggle" checked /><span class="slider-sw"></span></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <span class="section-title">Visualizer color</span>
+        <div class="sub-label">Preset colors</div>
+        <div class="swatches" id="presetColors"></div>
+        <div class="sub-label">Preset gradients</div>
+        <div class="swatches" id="presetGradients"></div>
+
+        <div class="sub-label">Custom color</div>
+        <div class="custom-row">
+          <input type="color" id="customColor" value="#22d3ee" />
+          <button class="btn" id="applyColor">Apply color</button>
+        </div>
+
+        <div class="sub-label">Custom gradient</div>
+        <div class="custom-row">
+          <input type="color" id="grad1" value="#6d5efc" />
+          <input type="color" id="grad2" value="#22d3ee" />
+          <input type="color" id="grad3" value="#ec4899" />
+          <button class="btn" id="applyGradient">Apply</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <span class="section-title">Tuning</span>
+        <div class="sub-label">Sensitivity</div>
+        <div class="range-row">
+          <input type="range" id="sensitivity" min="0.4" max="2.6" step="0.05" value="1.1" />
+          <span class="val" id="sensVal">1.1</span>
+        </div>
+        <div class="sub-label">Detail (bars / points)</div>
+        <div class="range-row">
+          <input type="range" id="detail" min="32" max="180" step="2" value="96" />
+          <span class="val" id="detailVal">96</span>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <span class="section-title">Recording</span>
+        <div class="switch-row">
+          <span style="font-size:14px">Include audio in video</span>
+          <label class="switch"><input type="checkbox" id="includeAudio" checked /><span class="slider-sw"></span></label>
+        </div>
+        <p class="hint">Records the visual at exactly 1080p (1920×1080 or 1080×1920). Settings, play and record buttons are never captured. Output is a <b>.webm</b> file. Recording plays the clip from the start and stops when it ends.</p>
+      </div>
+
+      <p class="hint">Background & profile images and all appearance settings are remembered on this browser. The audio clip must be re-added each session.</p>
+    </div>
+  </aside>
+
+  <div id="toast"></div>
+
+  <audio id="audioEl" crossorigin="anonymous"></audio>
+
+<script>
+"use strict";
+(function () {
+  // ---------------------------------------------------------------------------
+  // Elements
+  // ---------------------------------------------------------------------------
+  const canvas = document.getElementById("stage");
+  const ctx = canvas.getContext("2d");
+  const audioEl = document.getElementById("audioEl");
+
+  const settingsBtn = document.getElementById("settingsBtn");
+  const closePanel = document.getElementById("closePanel");
+  const overlay = document.getElementById("overlay");
+  const panel = document.getElementById("panel");
+  const playBtn = document.getElementById("playBtn");
+  const playIcon = document.getElementById("playIcon");
+  const pauseIcon = document.getElementById("pauseIcon");
+  const recBtn = document.getElementById("recBtn");
+  const recDot = document.getElementById("recDot");
+  const toast = document.getElementById("toast");
+
+  const audioInput = document.getElementById("audioInput");
+  const bgInput = document.getElementById("bgInput");
+  const profileInput = document.getElementById("profileInput");
+  const audioName = document.getElementById("audioName");
+  const bgName = document.getElementById("bgName");
+  const profileName = document.getElementById("profileName");
+
+  const aspectSeg = document.getElementById("aspectSeg");
+  const shapeSeg = document.getElementById("shapeSeg");
+  const presetColorsEl = document.getElementById("presetColors");
+  const presetGradientsEl = document.getElementById("presetGradients");
+  const customColorEl = document.getElementById("customColor");
+  const applyColorBtn = document.getElementById("applyColor");
+  const grad1 = document.getElementById("grad1");
+  const grad2 = document.getElementById("grad2");
+  const grad3 = document.getElementById("grad3");
+  const applyGradientBtn = document.getElementById("applyGradient");
+  const sensitivityEl = document.getElementById("sensitivity");
+  const sensVal = document.getElementById("sensVal");
+  const detailEl = document.getElementById("detail");
+  const detailVal = document.getElementById("detailVal");
+  const includeAudioEl = document.getElementById("includeAudio");
+
+  const rotateToggle = document.getElementById("rotateToggle");
+  const vignetteToggle = document.getElementById("vignetteToggle");
+  const bgPresetsEl = document.getElementById("bgPresets");
+  const circleSizeEl = document.getElementById("circleSize");
+  const circleSizeVal = document.getElementById("circleSizeVal");
+  const profileZoomEl = document.getElementById("profileZoom");
+  const profileZoomVal = document.getElementById("profileZoomVal");
+  const profileXEl = document.getElementById("profileX");
+  const profileYEl = document.getElementById("profileY");
+  const bgZoomEl = document.getElementById("bgZoom");
+  const bgZoomVal = document.getElementById("bgZoomVal");
+  const bgXEl = document.getElementById("bgX");
+  const bgYEl = document.getElementById("bgY");
+  const resetPosBtn = document.getElementById("resetPos");
+
+  const TWO_PI = Math.PI * 2;
+
+  // ---------------------------------------------------------------------------
+  // Preset palettes
+  // ---------------------------------------------------------------------------
+  const PRESET_COLORS = ["#ffffff", "#22d3ee", "#6d5efc", "#ec4899", "#a3e635", "#f59e0b", "#ef4444", "#3b82f6"];
+  const PRESET_GRADIENTS = [
+    { name: "Neon",   stops: ["#06b6d4", "#8b5cf6", "#ec4899"] },
+    { name: "Sunset", stops: ["#f97316", "#ec4899", "#8b5cf6"] },
+    { name: "Aurora", stops: ["#22d3ee", "#34d399", "#a3e635"] },
+    { name: "Ocean",  stops: ["#0ea5e9", "#2563eb", "#1e3a8a"] },
+    { name: "Fire",   stops: ["#fbbf24", "#f97316", "#dc2626"] },
+    { name: "Ice",    stops: ["#e0f2fe", "#7dd3fc", "#0ea5e9"] },
+  ];
+
+  // Procedural background presets (vertical gradient + soft center glow)
+  const BG_PRESETS = [
+    { name: "Midnight", stops: ["#1e293b", "#020617"], glow: "rgba(109,94,252,0.30)" },
+    { name: "Aurora",   stops: ["#0b132b", "#1c2541"], glow: "rgba(34,211,238,0.28)" },
+    { name: "Sunset",   stops: ["#2d1b4e", "#c2410c"], glow: "rgba(249,115,22,0.26)" },
+    { name: "Ember",    stops: ["#1a0505", "#7f1d1d"], glow: "rgba(239,68,68,0.30)" },
+    { name: "Ocean",    stops: ["#012a4a", "#013a63"], glow: "rgba(14,165,233,0.28)" },
+    { name: "Grape",    stops: ["#240046", "#5a189a"], glow: "rgba(157,78,221,0.30)" },
+    { name: "Slate",    stops: ["#111827", "#374151"], glow: "rgba(148,163,184,0.20)" },
+    { name: "Rose",     stops: ["#3f0d20", "#be185d"], glow: "rgba(244,114,182,0.26)" },
+    // lighter backgrounds
+    { name: "Paper",    stops: ["#f8fafc", "#e2e8f0"], glow: "rgba(148,163,184,0.12)" },
+    { name: "Cream",    stops: ["#fef9c3", "#fde68a"], glow: "rgba(251,191,36,0.16)" },
+    { name: "Mist",     stops: ["#eff6ff", "#dbeafe"], glow: "rgba(59,130,246,0.12)" },
+    { name: "Blush",    stops: ["#fdf2f8", "#fbcfe8"], glow: "rgba(236,72,153,0.14)" },
+    { name: "Cloud",    stops: ["#ffffff", "#e5e7eb"], glow: "rgba(15,23,42,0.05)" },
+  ];
+
+  // ---------------------------------------------------------------------------
+  // State + persistence
+  // ---------------------------------------------------------------------------
+  const STORAGE_KEY = "audioVisualizerStudio.v1";
+  const state = {
+    aspect: "16:9",
+    shape: "bars",
+    color: { type: "gradient", value: ["#06b6d4", "#8b5cf6", "#ec4899"] },
+    sensitivity: 1.1,
+    detail: 96,
+    includeAudio: true,
+    vignette: true,          // dim + vignette the background
+    rotate: true,            // spin the visualizer
+    bgImageData: null,       // data URL
+    profileImageData: null,  // data URL
+    // background source: null (default placeholder) | "preset" | "image"
+    bgSource: null,
+    bgPreset: 0,
+    // circle + positioning
+    circleSize: 0.14,        // profile radius as fraction of min canvas dimension
+    profileScale: 1,         // zoom of image inside the circle
+    profileOffX: 0,          // pan, fraction of circle radius (-1..1)
+    profileOffY: 0,
+    bgScale: 1,              // zoom of uploaded background (1 = cover fit)
+    bgOffX: 0,               // pan, fraction of canvas (-0.5..0.5)
+    bgOffY: 0,
+  };
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      // Most likely quota exceeded due to large images — non-fatal.
+      console.warn("Could not persist settings:", e);
+    }
+  }
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) Object.assign(state, JSON.parse(raw));
+      // legacy states saved a background image without a source flag
+      if (state.bgImageData && !state.bgSource) state.bgSource = "image";
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Images
+  // ---------------------------------------------------------------------------
+  let bgImg = null;       // HTMLImageElement or null
+  let profileImg = null;  // HTMLImageElement or null
+
+  function loadImage(src) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Audio graph
+  // ---------------------------------------------------------------------------
+  let audioCtx = null, analyser = null, srcNode = null, streamDest = null;
+  let freqData = null;
+  let audioLoaded = false;
+
+  function ensureAudioGraph() {
+    if (audioCtx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+    srcNode = audioCtx.createMediaElementSource(audioEl);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.82;
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    streamDest = audioCtx.createMediaStreamDestination();
+    srcNode.connect(analyser);
+    analyser.connect(audioCtx.destination);   // to speakers
+    analyser.connect(streamDest);             // for recording
+  }
+
+  // Smoothed magnitude buffer for pleasant, non-jittery motion
+  let smooth = new Float32Array(256);
+
+  function sampleAudio(points) {
+    // Returns array of `points` normalized magnitudes [0..1], symmetric-friendly.
+    const out = new Float32Array(points);
+    if (!analyser) return out;
+    analyser.getByteFrequencyData(freqData);
+    const usable = Math.floor(freqData.length * 0.62); // emphasize musical range
+    if (smooth.length !== points) smooth = new Float32Array(points);
+    for (let i = 0; i < points; i++) {
+      const idx = Math.floor((i / points) * usable);
+      const target = (freqData[idx] / 255) * state.sensitivity;
+      smooth[i] += (target - smooth[i]) * 0.35; // temporal easing
+      out[i] = smooth[i];
+    }
+    return out;
+  }
+
+  function bassEnergy() {
+    if (!analyser) return 0;
+    // freqData already filled by sampleAudio each frame
+    let sum = 0; const n = 8;
+    for (let i = 0; i < n; i++) sum += freqData[i];
+    return (sum / n / 255) * state.sensitivity;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Layout
+  // ---------------------------------------------------------------------------
+  function applyAspect() {
+    if (state.aspect === "9:16") { canvas.width = 1080; canvas.height = 1920; }
+    else { canvas.width = 1920; canvas.height = 1080; }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Paint (color / gradient resolution)
+  // ---------------------------------------------------------------------------
+  function resolvePaint(cx, cy, rInner, rOuter) {
+    if (state.color.type === "solid") return state.color.value;
+    const stops = state.color.value;
+    const g = ctx.createRadialGradient(cx, cy, Math.max(1, rInner * 0.4), cx, cy, rOuter);
+    for (let i = 0; i < stops.length; i++) {
+      g.addColorStop(stops.length === 1 ? 1 : i / (stops.length - 1), stops[i]);
+    }
+    return g;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drawing helpers
+  // ---------------------------------------------------------------------------
+  function drawCover(img, W, H, scale, offX, offY) {
+    scale = scale || 1; offX = offX || 0; offY = offY || 0;
+    const ir = img.width / img.height, cr = W / H;
+    let dw, dh;
+    if (ir > cr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
+    dw *= scale; dh *= scale;
+    ctx.drawImage(img, (W - dw) / 2 + offX * W, (H - dh) / 2 + offY * H, dw, dh);
+  }
+
+  function drawPresetBg(p, W, H) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, p.stops[0]);
+    g.addColorStop(1, p.stops[1]);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    const rg = ctx.createRadialGradient(W / 2, H * 0.4, 0, W / 2, H * 0.4, Math.max(W, H) * 0.62);
+    rg.addColorStop(0, p.glow);
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawPlaceholderBg(W, H) {
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, "#1e293b");
+    g.addColorStop(0.5, "#0f172a");
+    g.addColorStop(1, "#020617");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    const rg = ctx.createRadialGradient(W / 2, H * 0.42, 0, W / 2, H * 0.42, Math.max(W, H) * 0.6);
+    rg.addColorStop(0, "rgba(109,94,252,0.28)");
+    rg.addColorStop(1, "rgba(109,94,252,0)");
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function smoothClosedPath(pts) {
+    const n = pts.length;
+    ctx.beginPath();
+    let mx = (pts[n - 1].x + pts[0].x) / 2;
+    let my = (pts[n - 1].y + pts[0].y) / 2;
+    ctx.moveTo(mx, my);
+    for (let i = 0; i < n; i++) {
+      const cur = pts[i], next = pts[(i + 1) % n];
+      ctx.quadraticCurveTo(cur.x, cur.y, (cur.x + next.x) / 2, (cur.y + next.y) / 2);
+    }
+    ctx.closePath();
+  }
+
+  // ---- shape: radial bars ----
+  function drawBars(cx, cy, rInner, mags, rOuter, spin) {
+    const n = mags.length;
+    const half = Math.floor(n / 2);
+    const total = half * 2;
+    const maxLen = rOuter - rInner;
+    ctx.strokeStyle = resolvePaint(cx, cy, rInner, rOuter);
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(2, (TWO_PI * rInner) / total * 0.55);
+    const rot = spin * 0.06;
+    for (let i = 0; i < total; i++) {
+      const src = i < half ? i : total - 1 - i;         // mirror for symmetry
+      const v = mags[src];
+      const len = 6 + v * maxLen;
+      const a = (i / total) * TWO_PI - Math.PI / 2 + rot;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      ctx.beginPath();
+      ctx.moveTo(cx + ca * rInner, cy + sa * rInner);
+      ctx.lineTo(cx + ca * (rInner + len), cy + sa * (rInner + len));
+      ctx.stroke();
+    }
+  }
+
+  // ---- shape: solid blob ----
+  function drawBlob(cx, cy, rInner, mags, rOuter, spin) {
+    const n = mags.length;
+    const amp = (rOuter - rInner) * 0.9;
+    const pts = [];
+    const rot = spin * 0.12;
+    for (let i = 0; i < n; i++) {
+      const src = i < n / 2 ? i : n - 1 - i;            // symmetric
+      const r = rInner + 10 + mags[src] * amp;
+      const a = (i / n) * TWO_PI + rot;
+      pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+    smoothClosedPath(pts);
+    ctx.fillStyle = resolvePaint(cx, cy, rInner, rOuter);
+    ctx.globalAlpha = 0.9;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // circular moving-average — softens the per-point radius for smoother curves
+  function smoothRing(arr, radius) {
+    const n = arr.length, out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (let k = -radius; k <= radius; k++) s += arr[(i + k + n) % n];
+      out[i] = s / (radius * 2 + 1);
+    }
+    return out;
+  }
+
+  // ---- shape: curve lines ----
+  function drawLines(cx, cy, rInner, mags, rOuter, spin) {
+    const n = mags.length;
+    const rings = 5;
+    const gap = (rOuter - rInner) * 0.1;   // tight spacing between adjacent curves
+    // symmetric + doubly-smoothed magnitude ring for flowing lines
+    const ring0 = new Float32Array(n);
+    for (let i = 0; i < n; i++) ring0[i] = mags[i < n / 2 ? i : n - 1 - i];
+    const sm = smoothRing(smoothRing(ring0, 2), 2);
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = resolvePaint(cx, cy, rInner, rOuter);
+    for (let ring = 0; ring < rings; ring++) {
+      const base = rInner + 6 + gap * ring;
+      const amp = gap * 1.7;
+      const rot = spin * (0.05 + ring * 0.015) * (ring % 2 ? -1 : 1);
+      const phase = ring * 0.9;
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const wob = Math.sin((i / n) * TWO_PI * 2 + phase + spin * 0.6) * 0.18;
+        const r = base + sm[i] * amp * (1 + wob);
+        const a = (i / n) * TWO_PI + rot;
+        pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+      }
+      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.9 - ring * 0.1;
+      smoothClosedPath(pts);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---- center profile + glow ----
+  function drawProfile(cx, cy, r, bass) {
+    // reactive glow ring
+    const glow = r * (0.06 + bass * 0.32);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + glow * 0.5, 0, TWO_PI);
+    ctx.strokeStyle = resolvePaint(cx, cy, r, r + glow + 40);
+    ctx.lineWidth = 3 + glow;
+    ctx.globalAlpha = 0.5 + bass * 0.4;
+    ctx.shadowBlur = 25 + bass * 60;
+    ctx.shadowColor = "rgba(255,255,255,0.5)";
+    ctx.stroke();
+    ctx.restore();
+
+    // white rim
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 4, 0, TWO_PI);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fill();
+
+    // clipped image or placeholder
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, TWO_PI);
+    ctx.clip();
+    if (profileImg) {
+      const s = Math.max((r * 2) / profileImg.width, (r * 2) / profileImg.height) * state.profileScale;
+      const w = profileImg.width * s, h = profileImg.height * s;
+      ctx.drawImage(profileImg, cx - w / 2 + state.profileOffX * r, cy - h / 2 + state.profileOffY * r, w, h);
+    } else {
+      const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+      g.addColorStop(0, "#3b3f52"); g.addColorStop(1, "#20222e");
+      ctx.fillStyle = g;
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      // simple silhouette
+      ctx.fillStyle = "rgba(255,255,255,0.35)";
+      ctx.beginPath(); ctx.arc(cx, cy - r * 0.18, r * 0.32, 0, TWO_PI); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy + r * 0.62, r * 0.55, Math.PI, TWO_PI); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render loop
+  // ---------------------------------------------------------------------------
+  let lastFrame = performance.now(), rotAcc = 0;
+  function render() {
+    const W = canvas.width, H = canvas.height;
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    if (state.rotate) rotAcc += dt;      // only advances while rotation is on
+    const spin = rotAcc;
+    const cx = W / 2, cy = H / 2;
+    const minDim = Math.min(W, H);
+    const rProfile = minDim * state.circleSize;
+    const rInner = rProfile * 1.18;
+    const rOuter = minDim * 0.46;
+
+    // 1. background
+    if (state.bgSource === "image" && bgImg) drawCover(bgImg, W, H, state.bgScale, state.bgOffX, state.bgOffY);
+    else if (state.bgSource === "preset") drawPresetBg(BG_PRESETS[state.bgPreset] || BG_PRESETS[0], W, H);
+    else drawPlaceholderBg(W, H);
+
+    // 2. contrast overlay + vignette (optional)
+    if (state.vignette) {
+      ctx.fillStyle = "rgba(0,0,0,0.32)";
+      ctx.fillRect(0, 0, W, H);
+      const vg = ctx.createRadialGradient(cx, cy, minDim * 0.2, cx, cy, Math.max(W, H) * 0.62);
+      vg.addColorStop(0, "rgba(0,0,0,0)");
+      vg.addColorStop(1, "rgba(0,0,0,0.55)");
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // 3. audio data
+    const mags = sampleAudio(state.detail);
+    const bass = bassEnergy();
+
+    // 4. visualizer
+    ctx.save();
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    if (state.shape === "blob") drawBlob(cx, cy, rInner, mags, rOuter, spin);
+    else if (state.shape === "lines") drawLines(cx, cy, rInner, mags, rOuter, spin);
+    else drawBars(cx, cy, rInner, mags, rOuter, spin);
+    ctx.restore();
+
+    // 5. profile
+    drawProfile(cx, cy, rProfile, bass);
+
+    requestAnimationFrame(render);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Recording
+  // ---------------------------------------------------------------------------
+  let mediaRecorder = null, recChunks = [], isRecording = false;
+
+  function pickMime() {
+    const opts = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+    for (const m of opts) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+    return "";
+  }
+
+  function startRecording() {
+    if (!audioLoaded) { showToast("Add an audio clip first (Settings)"); return; }
+    if (!canvas.captureStream) { showToast("Recording not supported in this browser"); return; }
+    ensureAudioGraph();
+
+    const videoStream = canvas.captureStream(60);
+    const tracks = videoStream.getVideoTracks();
+    if (state.includeAudio) {
+      const aTracks = streamDest.stream.getAudioTracks();
+      for (const tr of aTracks) videoStream.addTrack(tr);
+    }
+    const mime = pickMime();
+    try {
+      mediaRecorder = new MediaRecorder(videoStream, mime ? { mimeType: mime, videoBitsPerSecond: 12000000 } : undefined);
+    } catch (e) {
+      showToast("Could not start recorder: " + e.message);
+      return;
+    }
+    recChunks = [];
+    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+    mediaRecorder.onstop = finishRecording;
+
+    // Restart the clip so the whole song is captured
+    audioCtx.resume();
+    audioEl.currentTime = 0;
+    audioEl.play();
+    mediaRecorder.start(100);
+
+    isRecording = true;
+    recBtn.classList.add("recording");
+    recDot.classList.add("show");
+    setPlayIcon(true);
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+    audioEl.pause();
+    isRecording = false;
+    recBtn.classList.remove("recording");
+    recDot.classList.remove("show");
+    setPlayIcon(false);
+  }
+
+  function finishRecording() {
+    const blob = new Blob(recChunks, { type: "video/webm" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    a.href = url;
+    a.download = "visualizer-" + ts + ".webm";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    showToast("Saved " + a.download);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playback
+  // ---------------------------------------------------------------------------
+  function setPlayIcon(playing) {
+    playIcon.style.display = playing ? "none" : "block";
+    pauseIcon.style.display = playing ? "block" : "none";
+  }
+  function togglePlay() {
+    if (!audioLoaded) { showToast("Add an audio clip first (Settings)"); openPanel(); return; }
+    ensureAudioGraph();
+    audioCtx.resume();
+    if (audioEl.paused) { audioEl.play(); }
+    else { audioEl.pause(); }
+  }
+  audioEl.addEventListener("play", () => setPlayIcon(true));
+  audioEl.addEventListener("pause", () => { if (!isRecording) setPlayIcon(false); });
+  audioEl.addEventListener("ended", () => {
+    if (isRecording) stopRecording();
+    else setPlayIcon(false);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Panel + toast
+  // ---------------------------------------------------------------------------
+  function openPanel() { panel.classList.add("open"); overlay.classList.add("open"); }
+  function closePanelFn() { panel.classList.remove("open"); overlay.classList.remove("open"); }
+  let toastTimer;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build color swatches
+  // ---------------------------------------------------------------------------
+  function buildSwatches() {
+    PRESET_COLORS.forEach((c) => {
+      const el = document.createElement("div");
+      el.className = "swatch";
+      el.style.background = c;
+      el.dataset.solid = c;
+      el.addEventListener("click", () => {
+        state.color = { type: "solid", value: c };
+        markActiveSwatch(el);
+        saveState();
+      });
+      presetColorsEl.appendChild(el);
+    });
+    PRESET_GRADIENTS.forEach((g) => {
+      const el = document.createElement("div");
+      el.className = "swatch";
+      el.style.background = "linear-gradient(135deg," + g.stops.join(",") + ")";
+      el.dataset.grad = g.stops.join(",");
+      el.title = g.name;
+      el.addEventListener("click", () => {
+        state.color = { type: "gradient", value: g.stops.slice() };
+        markActiveSwatch(el);
+        saveState();
+      });
+      presetGradientsEl.appendChild(el);
+    });
+  }
+  const COLOR_SWATCHES = "#presetColors .swatch, #presetGradients .swatch";
+  function markActiveSwatch(active) {
+    document.querySelectorAll(COLOR_SWATCHES).forEach((s) => s.classList.remove("active"));
+    if (active) active.classList.add("active");
+  }
+  function syncActiveSwatch() {
+    // highlight the color swatch matching current state, if any
+    let matched = null;
+    document.querySelectorAll(COLOR_SWATCHES).forEach((s) => {
+      if (state.color.type === "solid" && s.dataset.solid === state.color.value) matched = s;
+      if (state.color.type === "gradient" && s.dataset.grad === state.color.value.join(",")) matched = s;
+    });
+    markActiveSwatch(matched);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Background presets
+  // ---------------------------------------------------------------------------
+  function buildBgPresets() {
+    BG_PRESETS.forEach((p, i) => {
+      const el = document.createElement("div");
+      el.className = "swatch";
+      el.style.background = "linear-gradient(160deg," + p.stops[0] + "," + p.stops[1] + ")";
+      el.dataset.bgpreset = i;
+      el.title = p.name;
+      el.addEventListener("click", () => {
+        state.bgSource = "preset";
+        state.bgPreset = i;
+        bgName.textContent = p.name;
+        markActiveBgPreset();
+        saveState();
+      });
+      bgPresetsEl.appendChild(el);
+    });
+  }
+  function markActiveBgPreset() {
+    bgPresetsEl.querySelectorAll(".swatch").forEach((s, i) => {
+      s.classList.toggle("active", state.bgSource === "preset" && i === state.bgPreset);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wire up settings controls
+  // ---------------------------------------------------------------------------
+  function setSeg(segEl, attr, value) {
+    segEl.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset[attr] === value));
+  }
+
+  aspectSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.aspect = b.dataset.aspect;
+    setSeg(aspectSeg, "aspect", state.aspect);
+    applyAspect();
+    saveState();
+  });
+  shapeSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.shape = b.dataset.shape;
+    setSeg(shapeSeg, "shape", state.shape);
+    saveState();
+  });
+
+  applyColorBtn.addEventListener("click", () => {
+    state.color = { type: "solid", value: customColorEl.value };
+    markActiveSwatch(null);
+    saveState();
+    showToast("Custom color applied");
+  });
+  applyGradientBtn.addEventListener("click", () => {
+    state.color = { type: "gradient", value: [grad1.value, grad2.value, grad3.value] };
+    markActiveSwatch(null);
+    saveState();
+    showToast("Custom gradient applied");
+  });
+
+  sensitivityEl.addEventListener("input", () => {
+    state.sensitivity = parseFloat(sensitivityEl.value);
+    sensVal.textContent = state.sensitivity.toFixed(2);
+    saveState();
+  });
+  detailEl.addEventListener("input", () => {
+    state.detail = parseInt(detailEl.value, 10);
+    detailVal.textContent = state.detail;
+    saveState();
+  });
+  includeAudioEl.addEventListener("change", () => {
+    state.includeAudio = includeAudioEl.checked;
+    saveState();
+  });
+  rotateToggle.addEventListener("change", () => { state.rotate = rotateToggle.checked; saveState(); });
+  vignetteToggle.addEventListener("change", () => { state.vignette = vignetteToggle.checked; saveState(); });
+
+  // Circle + position controls
+  function syncPositionUI() {
+    circleSizeEl.value = state.circleSize;
+    circleSizeVal.textContent = Math.round(state.circleSize * 100) + "%";
+    profileZoomEl.value = state.profileScale;
+    profileZoomVal.textContent = (+state.profileScale).toFixed(1) + "×";
+    profileXEl.value = state.profileOffX;
+    profileYEl.value = state.profileOffY;
+    bgZoomEl.value = state.bgScale;
+    bgZoomVal.textContent = (+state.bgScale).toFixed(1) + "×";
+    bgXEl.value = state.bgOffX;
+    bgYEl.value = state.bgOffY;
+  }
+  circleSizeEl.addEventListener("input", () => {
+    state.circleSize = parseFloat(circleSizeEl.value);
+    circleSizeVal.textContent = Math.round(state.circleSize * 100) + "%";
+    saveState();
+  });
+  profileZoomEl.addEventListener("input", () => {
+    state.profileScale = parseFloat(profileZoomEl.value);
+    profileZoomVal.textContent = state.profileScale.toFixed(1) + "×";
+    saveState();
+  });
+  profileXEl.addEventListener("input", () => { state.profileOffX = parseFloat(profileXEl.value); saveState(); });
+  profileYEl.addEventListener("input", () => { state.profileOffY = parseFloat(profileYEl.value); saveState(); });
+  bgZoomEl.addEventListener("input", () => {
+    state.bgScale = parseFloat(bgZoomEl.value);
+    bgZoomVal.textContent = state.bgScale.toFixed(1) + "×";
+    saveState();
+  });
+  bgXEl.addEventListener("input", () => { state.bgOffX = parseFloat(bgXEl.value); saveState(); });
+  bgYEl.addEventListener("input", () => { state.bgOffY = parseFloat(bgYEl.value); saveState(); });
+  resetPosBtn.addEventListener("click", () => {
+    state.circleSize = 0.14;
+    state.profileScale = 1; state.profileOffX = 0; state.profileOffY = 0;
+    state.bgScale = 1; state.bgOffX = 0; state.bgOffY = 0;
+    syncPositionUI();
+    saveState();
+    showToast("Position & size reset");
+  });
+
+  // File inputs
+  audioInput.addEventListener("change", () => {
+    const f = audioInput.files[0]; if (!f) return;
+    audioEl.src = URL.createObjectURL(f);
+    audioName.textContent = f.name;
+    audioLoaded = true;
+    setPlayIcon(false);
+    showToast("Audio loaded — press Play");
+  });
+  bgInput.addEventListener("change", () => {
+    const f = bgInput.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      state.bgImageData = reader.result;
+      state.bgSource = "image";
+      bgImg = await loadImage(reader.result);
+      bgName.textContent = f.name;
+      markActiveBgPreset();
+      saveState();
+    };
+    reader.readAsDataURL(f);
+  });
+  profileInput.addEventListener("change", () => {
+    const f = profileInput.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      state.profileImageData = reader.result;
+      profileImg = await loadImage(reader.result);
+      profileName.textContent = f.name;
+      saveState();
+    };
+    reader.readAsDataURL(f);
+  });
+
+  // Buttons
+  settingsBtn.addEventListener("click", openPanel);
+  closePanel.addEventListener("click", closePanelFn);
+  overlay.addEventListener("click", closePanelFn);
+  playBtn.addEventListener("click", togglePlay);
+  recBtn.addEventListener("click", () => { isRecording ? stopRecording() : startRecording(); });
+  window.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.code === "Space") { e.preventDefault(); togglePlay(); }
+    if (e.key === "Escape") closePanelFn();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Apply loaded state to UI
+  // ---------------------------------------------------------------------------
+  async function applyStateToUI() {
+    setSeg(aspectSeg, "aspect", state.aspect);
+    setSeg(shapeSeg, "shape", state.shape);
+    sensitivityEl.value = state.sensitivity; sensVal.textContent = (+state.sensitivity).toFixed(2);
+    detailEl.value = state.detail; detailVal.textContent = state.detail;
+    includeAudioEl.checked = state.includeAudio;
+    rotateToggle.checked = state.rotate;
+    vignetteToggle.checked = state.vignette;
+    if (state.color.type === "gradient" && state.color.value.length >= 3) {
+      grad1.value = state.color.value[0]; grad2.value = state.color.value[1]; grad3.value = state.color.value[2];
+    } else if (state.color.type === "solid") {
+      customColorEl.value = state.color.value;
+    }
+    syncActiveSwatch();
+    syncPositionUI();
+    markActiveBgPreset();
+    applyAspect();
+    if (state.bgImageData) { bgImg = await loadImage(state.bgImageData); }
+    if (state.bgSource === "image" && state.bgImageData) bgName.textContent = "saved image";
+    else if (state.bgSource === "preset") bgName.textContent = BG_PRESETS[state.bgPreset] ? BG_PRESETS[state.bgPreset].name : "preset";
+    if (state.profileImageData) { profileImg = await loadImage(state.profileImageData); profileName.textContent = "saved image"; }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Init
+  // ---------------------------------------------------------------------------
+  loadState();
+  buildSwatches();
+  buildBgPresets();
+  applyStateToUI();
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Editor / preview tooling
+.claude/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Recorded outputs
+*.webm
