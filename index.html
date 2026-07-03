@@ -231,6 +231,12 @@
         </label>
         <input type="file" id="bgInput" class="file-input" accept="image/*" />
 
+        <label class="file-label" for="bgVideoInput" style="margin-top:8px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 9l5-3v12l-5-3z"/></svg>
+          Background video <span class="name" id="bgVideoName">none</span>
+        </label>
+        <input type="file" id="bgVideoInput" class="file-input" accept="video/*" />
+
         <label class="file-label" for="profileInput" style="margin-top:8px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
           Profile picture <span class="name" id="profileName">default</span>
@@ -245,7 +251,12 @@
           <span style="font-size:14px">Vignette &amp; dimming</span>
           <label class="switch"><input type="checkbox" id="vignetteToggle" checked /><span class="slider-sw"></span></label>
         </div>
-        <p class="hint">Pick a ready-made background, or upload your own above (an upload takes over). Turn off the vignette for a brighter, flat background.</p>
+        <div class="sub-label">Vignette density</div>
+        <div class="range-row">
+          <input type="range" id="vignetteStrength" min="0" max="1.5" step="0.05" value="0.9" />
+          <span class="val" id="vignetteStrengthVal">90%</span>
+        </div>
+        <p class="hint">Pick a ready-made background, or upload your own above (an upload takes over). Turn the vignette off, or dial its density up/down for a brighter or moodier frame.</p>
       </div>
 
       <div class="divider"></div>
@@ -290,7 +301,22 @@
         </div>
 
         <button class="btn" id="resetPos" style="margin-top:14px">Reset position &amp; size</button>
-        <p class="hint">Background zoom/position apply to an uploaded image (presets fill the whole frame).</p>
+        <p class="hint">Background zoom/position apply to an uploaded image or video (presets fill the whole frame).</p>
+      </div>
+
+      <div class="section">
+        <span class="section-title">Background effects</span>
+        <div class="sub-label">Background blur</div>
+        <div class="range-row">
+          <input type="range" id="bgBlur" min="0" max="40" step="1" value="0" />
+          <span class="val" id="bgBlurVal">0px</span>
+        </div>
+        <div class="sub-label">Video speed</div>
+        <div class="range-row">
+          <input type="range" id="bgSpeed" min="0.25" max="2" step="0.05" value="1" />
+          <span class="val" id="bgSpeedVal">1.00&times;</span>
+        </div>
+        <p class="hint">Blur applies to an uploaded image or video. Speed applies to a background video.</p>
       </div>
 
       <div class="section">
@@ -362,6 +388,7 @@
   <div id="toast"></div>
 
   <audio id="audioEl" crossorigin="anonymous"></audio>
+  <video id="bgVideo" muted loop playsinline crossorigin="anonymous" style="display:none"></video>
 
 <script>
 "use strict";
@@ -409,6 +436,15 @@
 
   const rotateToggle = document.getElementById("rotateToggle");
   const vignetteToggle = document.getElementById("vignetteToggle");
+  const vignetteStrengthEl = document.getElementById("vignetteStrength");
+  const vignetteStrengthVal = document.getElementById("vignetteStrengthVal");
+  const bgVideoInput = document.getElementById("bgVideoInput");
+  const bgVideoName = document.getElementById("bgVideoName");
+  const bgVideoEl = document.getElementById("bgVideo");
+  const bgBlurEl = document.getElementById("bgBlur");
+  const bgBlurVal = document.getElementById("bgBlurVal");
+  const bgSpeedEl = document.getElementById("bgSpeed");
+  const bgSpeedVal = document.getElementById("bgSpeedVal");
   const bgPresetsEl = document.getElementById("bgPresets");
   const circleSizeEl = document.getElementById("circleSize");
   const circleSizeVal = document.getElementById("circleSizeVal");
@@ -467,7 +503,10 @@
     detail: 96,
     includeAudio: true,
     vignette: true,          // dim + vignette the background
+    vignetteStrength: 0.9,   // vignette density (0..1.5)
     rotate: true,            // spin the visualizer
+    bgBlur: 0,               // background blur radius in px (0..40)
+    bgVideoSpeed: 1,         // background video playback rate
     bgImageData: null,       // data URL
     profileImageData: null,  // data URL
     // background source: null (default placeholder) | "preset" | "image"
@@ -497,6 +536,8 @@
       if (raw) Object.assign(state, JSON.parse(raw));
       // legacy states saved a background image without a source flag
       if (state.bgImageData && !state.bgSource) state.bgSource = "image";
+      // a background video object URL cannot survive a reload — fall back
+      if (state.bgSource === "video") state.bgSource = state.bgImageData ? "image" : null;
     } catch (e) { /* ignore */ }
   }
 
@@ -590,7 +631,9 @@
   // ---------------------------------------------------------------------------
   function drawCover(img, W, H, scale, offX, offY) {
     scale = scale || 1; offX = offX || 0; offY = offY || 0;
-    const ir = img.width / img.height, cr = W / H;
+    const iw = img.videoWidth || img.naturalWidth || img.width;
+    const ih = img.videoHeight || img.naturalHeight || img.height;
+    const ir = iw / ih, cr = W / H;
     let dw, dh;
     if (ir > cr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
     dw *= scale; dh *= scale;
@@ -781,18 +824,34 @@
     const rInner = rProfile * 1.18;
     const rOuter = minDim * 0.46;
 
-    // 1. background
-    if (state.bgSource === "image" && bgImg) drawCover(bgImg, W, H, state.bgScale, state.bgOffX, state.bgOffY);
-    else if (state.bgSource === "preset") drawPresetBg(BG_PRESETS[state.bgPreset] || BG_PRESETS[0], W, H);
-    else drawPlaceholderBg(W, H);
+    // 1. background — video or image (with optional blur), else preset / placeholder
+    let bgMedia = null;
+    if (state.bgSource === "video" && bgVideoEl.readyState >= 2) bgMedia = bgVideoEl;
+    else if (state.bgSource === "image" && bgImg) bgMedia = bgImg;
+    if (bgMedia) {
+      if (state.bgBlur > 0) {
+        // overscan so the blur doesn't reveal transparent edges
+        const overscan = 1 + state.bgBlur / 200;
+        ctx.filter = "blur(" + state.bgBlur + "px)";
+        drawCover(bgMedia, W, H, state.bgScale * overscan, state.bgOffX, state.bgOffY);
+        ctx.filter = "none";
+      } else {
+        drawCover(bgMedia, W, H, state.bgScale, state.bgOffX, state.bgOffY);
+      }
+    } else if (state.bgSource === "preset") {
+      drawPresetBg(BG_PRESETS[state.bgPreset] || BG_PRESETS[0], W, H);
+    } else {
+      drawPlaceholderBg(W, H);
+    }
 
-    // 2. contrast overlay + vignette (optional)
-    if (state.vignette) {
-      ctx.fillStyle = "rgba(0,0,0,0.32)";
+    // 2. contrast overlay + vignette (optional, density-controlled)
+    if (state.vignette && state.vignetteStrength > 0) {
+      const vs = state.vignetteStrength;
+      ctx.fillStyle = "rgba(0,0,0," + (0.3 * vs) + ")";
       ctx.fillRect(0, 0, W, H);
       const vg = ctx.createRadialGradient(cx, cy, minDim * 0.2, cx, cy, Math.max(W, H) * 0.62);
       vg.addColorStop(0, "rgba(0,0,0,0)");
-      vg.addColorStop(1, "rgba(0,0,0,0.55)");
+      vg.addColorStop(1, "rgba(0,0,0," + Math.min(0.92, 0.62 * vs) + ")");
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, W, H);
     }
@@ -976,6 +1035,7 @@
       el.addEventListener("click", () => {
         state.bgSource = "preset";
         state.bgPreset = i;
+        bgVideoEl.pause();
         bgName.textContent = p.name;
         markActiveBgPreset();
         saveState();
@@ -1039,6 +1099,22 @@
   });
   rotateToggle.addEventListener("change", () => { state.rotate = rotateToggle.checked; saveState(); });
   vignetteToggle.addEventListener("change", () => { state.vignette = vignetteToggle.checked; saveState(); });
+  vignetteStrengthEl.addEventListener("input", () => {
+    state.vignetteStrength = parseFloat(vignetteStrengthEl.value);
+    vignetteStrengthVal.textContent = Math.round(state.vignetteStrength * 100) + "%";
+    saveState();
+  });
+  bgBlurEl.addEventListener("input", () => {
+    state.bgBlur = parseInt(bgBlurEl.value, 10);
+    bgBlurVal.textContent = state.bgBlur + "px";
+    saveState();
+  });
+  bgSpeedEl.addEventListener("input", () => {
+    state.bgVideoSpeed = parseFloat(bgSpeedEl.value);
+    bgSpeedVal.textContent = state.bgVideoSpeed.toFixed(2) + "×";
+    if (bgVideoEl.readyState >= 1) bgVideoEl.playbackRate = state.bgVideoSpeed;
+    saveState();
+  });
 
   // Circle + position controls
   function syncPositionUI() {
@@ -1096,6 +1172,7 @@
     reader.onload = async () => {
       state.bgImageData = reader.result;
       state.bgSource = "image";
+      bgVideoEl.pause();
       bgImg = await loadImage(reader.result);
       bgName.textContent = f.name;
       markActiveBgPreset();
@@ -1103,6 +1180,17 @@
     };
     reader.readAsDataURL(f);
   });
+  bgVideoInput.addEventListener("change", () => {
+    const f = bgVideoInput.files[0]; if (!f) return;
+    bgVideoEl.src = URL.createObjectURL(f);
+    bgVideoEl.playbackRate = state.bgVideoSpeed;
+    bgVideoEl.play().catch(() => {});
+    state.bgSource = "video";
+    bgVideoName.textContent = f.name;
+    markActiveBgPreset();
+    saveState();
+  });
+  bgVideoEl.addEventListener("loadeddata", () => { bgVideoEl.playbackRate = state.bgVideoSpeed; });
   profileInput.addEventListener("change", () => {
     const f = profileInput.files[0]; if (!f) return;
     const reader = new FileReader();
@@ -1138,6 +1226,13 @@
     includeAudioEl.checked = state.includeAudio;
     rotateToggle.checked = state.rotate;
     vignetteToggle.checked = state.vignette;
+    vignetteStrengthEl.value = state.vignetteStrength;
+    vignetteStrengthVal.textContent = Math.round(state.vignetteStrength * 100) + "%";
+    bgBlurEl.value = state.bgBlur;
+    bgBlurVal.textContent = state.bgBlur + "px";
+    bgSpeedEl.value = state.bgVideoSpeed;
+    bgSpeedVal.textContent = (+state.bgVideoSpeed).toFixed(2) + "×";
+    bgVideoEl.playbackRate = state.bgVideoSpeed;
     if (state.color.type === "gradient" && state.color.value.length >= 3) {
       grad1.value = state.color.value[0]; grad2.value = state.color.value[1]; grad3.value = state.color.value[2];
     } else if (state.color.type === "solid") {
