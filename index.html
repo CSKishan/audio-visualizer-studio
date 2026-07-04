@@ -374,11 +374,16 @@
 
       <div class="section">
         <span class="section-title">Recording</span>
-        <div class="switch-row">
+        <div class="sub-label">Video format</div>
+        <div class="seg" id="formatSeg">
+          <button data-format="mp4" class="active">MP4</button>
+          <button data-format="webm">WebM</button>
+        </div>
+        <div class="switch-row" style="margin-top:12px">
           <span style="font-size:14px">Include audio in video</span>
           <label class="switch"><input type="checkbox" id="includeAudio" checked /><span class="slider-sw"></span></label>
         </div>
-        <p class="hint">Records the visual at exactly 1080p (1920×1080 or 1080×1920). Settings, play and record buttons are never captured. Output is a <b>.webm</b> file. Recording plays the clip from the start and stops when it ends.</p>
+        <p class="hint">Records the visual at exactly 1080p (1920×1080 or 1080×1920). Settings, play and record buttons are never captured. Output is an <b>MP4</b> (H.264) or <b>WebM</b> file — your choice. Recording plays the clip from the start and stops when it ends.</p>
       </div>
 
       <p class="hint">Background & profile images and all appearance settings are remembered on this browser. The audio clip must be re-added each session.</p>
@@ -433,6 +438,7 @@
   const detailEl = document.getElementById("detail");
   const detailVal = document.getElementById("detailVal");
   const includeAudioEl = document.getElementById("includeAudio");
+  const formatSeg = document.getElementById("formatSeg");
 
   const rotateToggle = document.getElementById("rotateToggle");
   const vignetteToggle = document.getElementById("vignetteToggle");
@@ -502,6 +508,7 @@
     sensitivity: 1.1,
     detail: 96,
     includeAudio: true,
+    videoFormat: "mp4",      // "mp4" | "webm"
     vignette: true,          // dim + vignette the background
     vignetteStrength: 0.9,   // vignette density (0..1.5)
     rotate: true,            // spin the visualizer
@@ -878,12 +885,25 @@
   // ---------------------------------------------------------------------------
   // Recording
   // ---------------------------------------------------------------------------
-  let mediaRecorder = null, recChunks = [], isRecording = false;
+  let mediaRecorder = null, recChunks = [], isRecording = false, recConfig = null;
 
-  function pickMime() {
-    const opts = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
-    for (const m of opts) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
-    return "";
+  // Picks the best recorder mime for the desired container, falling back to WebM
+  // if MP4 recording isn't available. Returns the container actually chosen.
+  function chooseRecordingConfig(format, withAudio) {
+    const cands = [];
+    if (format === "mp4") {
+      if (withAudio) cands.push("video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4;codecs=avc3.42E01E,mp4a.40.2");
+      cands.push("video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4");
+    }
+    if (withAudio) cands.push("video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus");
+    cands.push("video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm");
+    for (const m of cands) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) {
+        const isMp4 = m.indexOf("mp4") !== -1;
+        return { mimeType: m, ext: isMp4 ? "mp4" : "webm", blobType: isMp4 ? "video/mp4" : "video/webm" };
+      }
+    }
+    return { mimeType: "", ext: "webm", blobType: "video/webm" };
   }
 
   function startRecording() {
@@ -897,9 +917,12 @@
       const aTracks = streamDest.stream.getAudioTracks();
       for (const tr of aTracks) videoStream.addTrack(tr);
     }
-    const mime = pickMime();
+    recConfig = chooseRecordingConfig(state.videoFormat, state.includeAudio);
+    if (state.videoFormat === "mp4" && recConfig.ext !== "mp4") {
+      showToast("MP4 not supported here — recording WebM instead");
+    }
     try {
-      mediaRecorder = new MediaRecorder(videoStream, mime ? { mimeType: mime, videoBitsPerSecond: 12000000 } : undefined);
+      mediaRecorder = new MediaRecorder(videoStream, recConfig.mimeType ? { mimeType: recConfig.mimeType, videoBitsPerSecond: 12000000 } : undefined);
     } catch (e) {
       showToast("Could not start recorder: " + e.message);
       return;
@@ -930,12 +953,13 @@
   }
 
   function finishRecording() {
-    const blob = new Blob(recChunks, { type: "video/webm" });
+    const cfg = recConfig || { blobType: "video/webm", ext: "webm" };
+    const blob = new Blob(recChunks, { type: cfg.blobType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
     a.href = url;
-    a.download = "visualizer-" + ts + ".webm";
+    a.download = "visualizer-" + ts + "." + cfg.ext;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1097,6 +1121,12 @@
     state.includeAudio = includeAudioEl.checked;
     saveState();
   });
+  formatSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.videoFormat = b.dataset.format;
+    setSeg(formatSeg, "format", state.videoFormat);
+    saveState();
+  });
   rotateToggle.addEventListener("change", () => { state.rotate = rotateToggle.checked; saveState(); });
   vignetteToggle.addEventListener("change", () => { state.vignette = vignetteToggle.checked; saveState(); });
   vignetteStrengthEl.addEventListener("input", () => {
@@ -1221,6 +1251,7 @@
   async function applyStateToUI() {
     setSeg(aspectSeg, "aspect", state.aspect);
     setSeg(shapeSeg, "shape", state.shape);
+    setSeg(formatSeg, "format", state.videoFormat);
     sensitivityEl.value = state.sensitivity; sensVal.textContent = (+state.sensitivity).toFixed(2);
     detailEl.value = state.detail; detailVal.textContent = state.detail;
     includeAudioEl.checked = state.includeAudio;

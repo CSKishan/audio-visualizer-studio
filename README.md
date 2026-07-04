@@ -13,7 +13,7 @@ Everything the video shows is drawn on one `<canvas>`; the on-screen controls si
 - **Positioning** — zoom and pan both the profile picture and the background; resize the central circle.
 - **Toggles** — rotate the visualizer on/off; enable/disable the background vignette & dimming.
 - **Orientation** — one click switches between 16:9 landscape and 9:16 portrait.
-- **Recording** — capture the composition at exactly **1920×1080** / **1080×1920** to a `.webm`, with an option to embed the audio track or record silent visuals.
+- **Recording** — capture the composition at exactly **1920×1080** / **1080×1920** as **MP4 (H.264)** or **WebM**, with an option to embed the audio track or record silent visuals.
 - **Persistence** — background, profile, and all appearance settings are remembered across reloads (via `localStorage`).
 
 ## Getting started
@@ -39,15 +39,16 @@ That's it.
 
 ## Recording notes
 
-- Clicking **Record** plays your clip from the start and records the visual; it **auto-stops when the clip ends** (or click again to stop early). The file downloads automatically as `visualizer-<timestamp>.webm`.
+- Clicking **Record** plays your clip from the start and records the visual; it **auto-stops when the clip ends** (or click again to stop early). The file downloads automatically as `visualizer-<timestamp>.mp4` (or `.webm`).
+- **Choose the format** in Settings → Recording: **MP4** (H.264, universally compatible — default) or **WebM** (VP9/VP8). MP4 is recorded natively by the browser, so there's no slow conversion step; if a browser can't record MP4, it falls back to WebM automatically.
 - Use the **"Include audio in video"** toggle to record with sound baked in, or silent visuals only (handy if you'll add audio in an editor).
 - The gear, play, record buttons, and the "REC" badge are HTML overlays — **never** part of the recording.
 - **Keep the tab focused and visible while recording.** Browsers pause canvas animation in hidden/minimized tabs, which would freeze the captured frames.
-- Output is **WebM (VP9/VP8)**, which imports directly into Premiere, DaVinci Resolve, and CapCut.
+- Output imports directly into Premiere, DaVinci Resolve, and CapCut — **MP4 (H.264/AAC)** is the most broadly compatible; **WebM (VP9/VP8)** is also available.
 
 ## Browser support
 
-Works in **Chromium-based browsers (Chrome, Edge)**, which fully support `canvas.captureStream()` and `MediaRecorder` with WebM. Other browsers may vary in recording support.
+Works in **Chromium-based browsers (Chrome, Edge)**, which fully support `canvas.captureStream()` and `MediaRecorder`. Recent Chrome/Edge record **MP4 (H.264)** natively; where that isn't available the tool falls back to **WebM**. Other browsers may vary in recording support.
 
 ## How it works
 
