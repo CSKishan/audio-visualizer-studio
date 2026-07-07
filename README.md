@@ -13,7 +13,7 @@ Everything the video shows is drawn on one `<canvas>`; the on-screen controls si
 - **Positioning** — zoom and pan both the profile picture and the background; resize the central circle.
 - **Toggles** — rotate the visualizer on/off; enable/disable the background vignette & dimming.
 - **Orientation** — one click switches between 16:9 landscape and 9:16 portrait.
-- **Recording** — capture the composition at exactly **1920×1080** / **1080×1920** as **MP4 (H.264)** or **WebM**, with an option to embed the audio track or record silent visuals.
+- **Recording** — capture the composition at exactly **1920×1080** / **1080×1920** as **MP4 (H.264)** or **WebM**, at **24 / 30 / 60 fps**, with an option to embed the audio track or record silent visuals.
 - **Persistence** — background, profile, and all appearance settings are remembered across reloads (via `localStorage`).
 
 ## Getting started
@@ -41,6 +41,19 @@ That's it.
 
 - Clicking **Record** plays your clip from the start and records the visual; it **auto-stops when the clip ends** (or click again to stop early). The file downloads automatically as `visualizer-<timestamp>.mp4` (or `.webm`).
 - **Choose the format** in Settings → Recording: **MP4** (H.264, universally compatible — default) or **WebM** (VP9/VP8). MP4 is recorded natively by the browser, so there's no slow conversion step; if a browser can't record MP4, it falls back to WebM automatically.
+- **Choose the frame rate** (24 / 30 / 60 fps). **30 fps is the default** and imports most reliably into editors.
+
+### Editor compatibility (DaVinci Resolve, etc.)
+
+Browser (`MediaRecorder`) files are **variable frame rate (VFR)**, which some editors — notably DaVinci Resolve — can reject or misread (wrong duration, "media offline"), regardless of bitrate. If an import misbehaves:
+
+1. Record at **30 fps** (Settings → Recording).
+2. If it still won't import, re-encode to **constant frame rate** with ffmpeg:
+   ```bash
+   ffmpeg -i visualizer.mp4 -c:v libx264 -r 30 -pix_fmt yuv420p -c:a aac -b:a 192k visualizer_cfr.mp4
+   ```
+   (HandBrake's "Fast 1080p30" preset does the same.)
+3. If only the audio fails, record with **"Include audio in video" off** and add the audio track in your editor.
 - Use the **"Include audio in video"** toggle to record with sound baked in, or silent visuals only (handy if you'll add audio in an editor).
 - The gear, play, record buttons, and the "REC" badge are HTML overlays — **never** part of the recording.
 - **Keep the tab focused and visible while recording.** Browsers pause canvas animation in hidden/minimized tabs, which would freeze the captured frames.

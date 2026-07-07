@@ -379,11 +379,18 @@
           <button data-format="mp4" class="active">MP4</button>
           <button data-format="webm">WebM</button>
         </div>
+        <div class="sub-label" style="margin-top:12px">Frame rate</div>
+        <div class="seg" id="fpsSeg">
+          <button data-fps="24">24 fps</button>
+          <button data-fps="30" class="active">30 fps</button>
+          <button data-fps="60">60 fps</button>
+        </div>
         <div class="switch-row" style="margin-top:12px">
           <span style="font-size:14px">Include audio in video</span>
           <label class="switch"><input type="checkbox" id="includeAudio" checked /><span class="slider-sw"></span></label>
         </div>
         <p class="hint">Records the visual at exactly 1080p (1920×1080 or 1080×1920). Settings, play and record buttons are never captured. Output is an <b>MP4</b> (H.264) or <b>WebM</b> file — your choice. Recording plays the clip from the start and stops when it ends.</p>
+        <p class="hint"><b>Editor tip:</b> use <b>30 fps</b> for the most reliable import into DaVinci Resolve and similar editors. Browser recordings are variable-frame-rate; if an import still misbehaves, re-encode to constant frame rate, e.g. <code>ffmpeg -i in.mp4 -c:v libx264 -r 30 -pix_fmt yuv420p -c:a aac -b:a 192k out.mp4</code>.</p>
       </div>
 
       <p class="hint">Background & profile images and all appearance settings are remembered on this browser. The audio clip must be re-added each session.</p>
@@ -439,6 +446,7 @@
   const detailVal = document.getElementById("detailVal");
   const includeAudioEl = document.getElementById("includeAudio");
   const formatSeg = document.getElementById("formatSeg");
+  const fpsSeg = document.getElementById("fpsSeg");
 
   const rotateToggle = document.getElementById("rotateToggle");
   const vignetteToggle = document.getElementById("vignetteToggle");
@@ -509,6 +517,7 @@
     detail: 96,
     includeAudio: true,
     videoFormat: "mp4",      // "mp4" | "webm"
+    fps: 30,                 // capture frame rate (24 | 30 | 60)
     vignette: true,          // dim + vignette the background
     vignetteStrength: 0.9,   // vignette density (0..1.5)
     rotate: true,            // spin the visualizer
@@ -911,7 +920,7 @@
     if (!canvas.captureStream) { showToast("Recording not supported in this browser"); return; }
     ensureAudioGraph();
 
-    const videoStream = canvas.captureStream(60);
+    const videoStream = canvas.captureStream(state.fps);
     const tracks = videoStream.getVideoTracks();
     if (state.includeAudio) {
       const aTracks = streamDest.stream.getAudioTracks();
@@ -1127,6 +1136,12 @@
     setSeg(formatSeg, "format", state.videoFormat);
     saveState();
   });
+  fpsSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.fps = parseInt(b.dataset.fps, 10);
+    setSeg(fpsSeg, "fps", b.dataset.fps);
+    saveState();
+  });
   rotateToggle.addEventListener("change", () => { state.rotate = rotateToggle.checked; saveState(); });
   vignetteToggle.addEventListener("change", () => { state.vignette = vignetteToggle.checked; saveState(); });
   vignetteStrengthEl.addEventListener("input", () => {
@@ -1252,6 +1267,7 @@
     setSeg(aspectSeg, "aspect", state.aspect);
     setSeg(shapeSeg, "shape", state.shape);
     setSeg(formatSeg, "format", state.videoFormat);
+    setSeg(fpsSeg, "fps", String(state.fps));
     sensitivityEl.value = state.sensitivity; sensVal.textContent = (+state.sensitivity).toFixed(2);
     detailEl.value = state.detail; detailVal.textContent = state.detail;
     includeAudioEl.checked = state.includeAudio;
