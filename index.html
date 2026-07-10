@@ -217,6 +217,18 @@
   input[type="range"] { width: 100%; accent-color: var(--accent); }
   .range-row { display: flex; align-items: center; gap: 12px; }
   .range-row .val { font-size: 12px; color: var(--text-dim); min-width: 34px; text-align: right; }
+  /* wrapper that overlays visible snap tick marks on a slider */
+  .slider-wrap { position: relative; flex: 1; display: flex; align-items: center; min-width: 0; }
+  .slider-wrap input[type="range"] { width: 100%; position: relative; z-index: 1; }
+  .slider-wrap .tick {
+    position: absolute; top: 50%; transform: translate(-50%, -50%);
+    width: 2px; height: 18px; border-radius: 1px;
+    background: rgba(255,255,255,0.55); pointer-events: none; z-index: 2;
+  }
+  .slider-wrap .tick::after {
+    content: ""; position: absolute; left: 50%; top: -6px; transform: translateX(-50%);
+    width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2);
+  }
 
   .hint { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; margin-top: 6px; }
   .divider { height: 1px; background: var(--border); margin: 20px 0; }
@@ -927,17 +939,20 @@
     ctx.lineCap = "round";
     ctx.lineWidth = Math.max(2, (TWO_PI * rInner) / total * 0.55);
     const rot = spin * 0.06;
+    // Batch every bar into ONE path so the (expensive) shadow blur runs once per
+    // frame instead of once per bar — keeps GPU load low. Round caps keep each
+    // segment looking like a separate bar.
+    ctx.beginPath();
     for (let i = 0; i < total; i++) {
       const src = i < half ? i : total - 1 - i;         // mirror for symmetry
       const v = mags[src];
       const len = 6 + v * maxLen;
       const a = (i / total) * TWO_PI - Math.PI / 2 + rot;
       const ca = Math.cos(a), sa = Math.sin(a);
-      ctx.beginPath();
       ctx.moveTo(cx + ca * rInner, cy + sa * rInner);
       ctx.lineTo(cx + ca * (rInner + len), cy + sa * (rInner + len));
-      ctx.stroke();
     }
+    ctx.stroke();
   }
 
   // ---- shape: solid blob ----
@@ -1030,14 +1045,22 @@
     const baseY = H * 0.86;
     const maxH = H * 0.22;
     ctx.fillStyle = resolvePaint(W / 2, baseY, 20, Math.max(W, H) * 0.5);
+    // Batch all rising bars into one path/fill and all reflections into another,
+    // so the shadow blur runs twice per frame instead of 2×N times.
+    ctx.globalAlpha = 0.95;
+    ctx.beginPath();
     for (let i = 0; i < n; i++) {
       const bh = mags[i] * maxH;
-      const x = i * barW;
-      ctx.globalAlpha = 0.95;
-      ctx.fillRect(x, baseY - bh, barW * 0.75, bh);          // rising bar
-      ctx.globalAlpha = 0.28;
-      ctx.fillRect(x, baseY + 2, barW * 0.75, bh * 0.6);     // reflection
+      ctx.rect(i * barW, baseY - bh, barW * 0.75, bh);       // rising bars
     }
+    ctx.fill();
+    ctx.globalAlpha = 0.28;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const bh = mags[i] * maxH;
+      ctx.rect(i * barW, baseY + 2, barW * 0.75, bh * 0.6);  // reflections
+    }
+    ctx.fill();
     ctx.globalAlpha = 1;
   }
 
@@ -1105,7 +1128,7 @@
   // ---------------------------------------------------------------------------
   // Render loop
   // ---------------------------------------------------------------------------
-  let lastFrame = performance.now(), rotAcc = 0, lastDraw = 0;
+  let lastFrame = performance.now(), rotAcc = 0, lastDraw = -1000; // ensure the first frame always draws
   function render() {
     requestAnimationFrame(render);
     const now = performance.now();
@@ -1157,8 +1180,12 @@
 
     // 4. visualizer
     ctx.save();
-    ctx.shadowBlur = 18;
-    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    // Soft shadow for depth. Skip it for the particle ring — a blur behind many
+    // tiny dots is invisible but costs a shadow pass per dot (GPU-heavy).
+    if (state.shape !== "particles") {
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = "rgba(0,0,0,0.35)";
+    }
     if (state.shape === "blob") drawBlob(cx, cy, rInner, mags, rOuter, spin);
     else if (state.shape === "lines") drawLines(cx, cy, rInner, mags, rOuter, spin);
     else if (state.shape === "wave") drawWaveform(cx, cy, rInner, mags, rOuter, spin);
@@ -1896,11 +1923,20 @@
       if (!el) return;
       const snaps = SNAP_CONFIG[id];
       el.dataset.snap = snaps.join(",");
-      const dl = document.createElement("datalist");   // tick marks
-      dl.id = "ticks-" + id;
-      snaps.forEach((s) => { const o = document.createElement("option"); o.value = s; dl.appendChild(o); });
-      el.parentNode.appendChild(dl);
-      el.setAttribute("list", dl.id);
+      const min = parseFloat(el.min), max = parseFloat(el.max), span = max - min || 1;
+      // wrap the slider so we can overlay clearly-visible tick marks at each snap point
+      const wrap = document.createElement("span");
+      wrap.className = "slider-wrap";
+      el.parentNode.insertBefore(wrap, el);
+      wrap.appendChild(el);
+      snaps.forEach((s) => {
+        const pct = Math.max(0, Math.min(100, ((s - min) / span) * 100));
+        const tick = document.createElement("span");
+        tick.className = "tick";
+        tick.style.left = pct + "%";
+        tick.title = "Snaps to " + s;
+        wrap.appendChild(tick);
+      });
     });
     // Capture phase so snapping runs before each slider's own input handler reads the value.
     panel.addEventListener("input", (e) => {
