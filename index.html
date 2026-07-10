@@ -63,6 +63,8 @@
   #recBtn { bottom: 22px; right: 20px; }
   #recBtn.recording { background: var(--danger); border-color: var(--danger); animation: pulse 1.4s infinite; }
   @keyframes pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(239,68,68,.5);} 50%{ box-shadow:0 0 0 12px rgba(239,68,68,0);} }
+  #recPauseBtn { bottom: 22px; right: 88px; display: none; }
+  #recPauseBtn.show { display: flex; }
 
   /* REC indicator (excluded from recording) */
   #recDot {
@@ -75,7 +77,44 @@
   }
   #recDot.show { display: flex; }
   #recDot .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--danger); animation: blink 1s steps(2,start) infinite; }
+  #recDot.paused .dot { animation: none; background: #f59e0b; }
   @keyframes blink { 50% { opacity: 0.15; } }
+
+  /* Recording progress (excluded from recording) */
+  #recProgress {
+    position: fixed; top: 58px; left: 22px; z-index: 30;
+    display: none; align-items: center; gap: 10px;
+    padding: 8px 14px; border-radius: 12px;
+    background: rgba(20,21,26,0.78); backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text);
+  }
+  #recProgress.show { display: flex; }
+  #recProgress .bar { width: 130px; height: 6px; border-radius: 3px; background: #2a2d38; overflow: hidden; }
+  #recProgress .bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width .1s linear; }
+
+  /* Countdown overlay (excluded from recording) */
+  #countdown {
+    position: fixed; inset: 0; z-index: 45;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.35); pointer-events: none;
+  }
+  #countdown.show { display: flex; }
+  #countdown span {
+    font-size: 22vmin; font-weight: 800; color: #fff;
+    text-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    animation: cd-pop .9s ease-out;
+  }
+  @keyframes cd-pop { 0% { transform: scale(0.5); opacity: 0; } 30% { opacity: 1; } 100% { transform: scale(1.15); opacity: 0.15; } }
+
+  /* Tab-hidden warning while recording (excluded from recording) */
+  #focusWarn {
+    position: fixed; top: 22px; left: 50%; transform: translateX(-50%); z-index: 55;
+    display: none; padding: 10px 18px; border-radius: 10px;
+    background: var(--danger); color: #fff; font-size: 13px; font-weight: 600;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+  #focusWarn.show { display: block; }
 
   /* ---------- Settings panel ---------- */
   #overlay {
@@ -129,6 +168,8 @@
   .file-label svg { width: 18px; height: 18px; opacity: .8; }
 
   .seg { display: flex; gap: 6px; }
+  .seg.wrap { flex-wrap: wrap; }
+  .seg.wrap button { flex: 1 1 28%; }
   .seg button {
     flex: 1; padding: 10px; border-radius: 9px;
     background: var(--panel-bg-2); border: 1px solid var(--border);
@@ -153,6 +194,10 @@
   input[type="color"] {
     width: 42px; height: 34px; padding: 0; border: 1px solid var(--border);
     border-radius: 8px; background: none; cursor: pointer;
+  }
+  input[type="text"], select {
+    padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-bg-2); color: var(--text); font-size: 13px; min-width: 0;
   }
   .btn {
     padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border);
@@ -191,8 +236,16 @@
     <canvas id="stage" width="1920" height="1080"></canvas>
   </div>
 
-  <!-- REC indicator (DOM overlay — not captured) -->
-  <div id="recDot"><span class="dot"></span>REC</div>
+  <!-- REC indicator + progress (DOM overlays — not captured) -->
+  <div id="recDot"><span class="dot"></span><span id="recLabel">REC</span></div>
+  <div id="recProgress">
+    <span id="recTime">0:00 / 0:00</span>
+    <span class="bar"><i id="recBarFill"></i></span>
+  </div>
+
+  <!-- Countdown + tab-focus warning (DOM overlays — not captured) -->
+  <div id="countdown"><span id="countdownNum">3</span></div>
+  <div id="focusWarn">⚠ Tab hidden — recording frames are frozen. Return to this tab.</div>
 
   <!-- Corner controls (DOM overlays — not captured) -->
   <button class="control-btn" id="settingsBtn" title="Settings">
@@ -202,6 +255,11 @@
   <button class="control-btn" id="playBtn" title="Play / Pause">
     <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
     <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+  </button>
+
+  <button class="control-btn" id="recPauseBtn" title="Pause / resume recording">
+    <svg id="recPauseIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+    <svg id="recResumeIcon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M8 5v14l11-7z"/></svg>
   </button>
 
   <button class="control-btn" id="recBtn" title="Record video">
@@ -262,11 +320,20 @@
       <div class="divider"></div>
 
       <div class="section">
-        <span class="section-title">Orientation</span>
+        <span class="section-title">Orientation &amp; resolution</span>
         <div class="seg" id="aspectSeg">
-          <button data-aspect="16:9" class="active">16:9 Landscape</button>
-          <button data-aspect="9:16">9:16 Portrait</button>
+          <button data-aspect="16:9" class="active">16:9</button>
+          <button data-aspect="9:16">9:16</button>
+          <button data-aspect="1:1">1:1</button>
         </div>
+        <div class="sub-label" style="margin-top:10px">Resolution</div>
+        <div class="seg" id="resSeg">
+          <button data-res="720">720p</button>
+          <button data-res="1080" class="active">1080p</button>
+          <button data-res="1440">1440p</button>
+          <button data-res="2160">4K</button>
+        </div>
+        <p class="hint" id="resHint">Output: 1920×1080. Higher resolutions (especially 4K) are heavier to record.</p>
       </div>
 
       <div class="section">
@@ -316,15 +383,23 @@
           <input type="range" id="bgSpeed" min="0.25" max="2" step="0.05" value="1" />
           <span class="val" id="bgSpeedVal">1.00&times;</span>
         </div>
-        <p class="hint">Blur applies to an uploaded image or video. Speed applies to a background video.</p>
+        <div class="sub-label">Seamless loop blend</div>
+        <div class="range-row">
+          <input type="range" id="bgLoopBlend" min="0.1" max="2" step="0.05" value="0.6" />
+          <span class="val" id="bgLoopBlendVal">0.60s</span>
+        </div>
+        <p class="hint">Blur applies to an uploaded image or video. Speed and loop blend apply to a background video — the loop crossfades its last frames into its first frames for a cut-free repeat.</p>
       </div>
 
       <div class="section">
         <span class="section-title">Visualizer shape</span>
-        <div class="seg" id="shapeSeg">
-          <button data-shape="bars" class="active">Radial bars</button>
+        <div class="seg wrap" id="shapeSeg">
+          <button data-shape="bars" class="active">Bars</button>
           <button data-shape="blob">Blob</button>
           <button data-shape="lines">Curves</button>
+          <button data-shape="wave">Wave</button>
+          <button data-shape="mirror">Mirror</button>
+          <button data-shape="particles">Particles</button>
         </div>
         <div class="switch-row" style="margin-top:12px">
           <span style="font-size:14px">Rotate visualizer</span>
@@ -389,8 +464,50 @@
           <span style="font-size:14px">Include audio in video</span>
           <label class="switch"><input type="checkbox" id="includeAudio" checked /><span class="slider-sw"></span></label>
         </div>
-        <p class="hint">Records the visual at exactly 1080p (1920×1080 or 1080×1920). Settings, play and record buttons are never captured. Output is an <b>MP4</b> (H.264) or <b>WebM</b> file — your choice. Recording plays the clip from the start and stops when it ends.</p>
+
+        <div class="sub-label" style="margin-top:12px">Save recordings to</div>
+        <div class="seg" id="downloadSeg">
+          <button data-dl="browser" class="active">Browser</button>
+          <button data-dl="ask">Ask each time</button>
+          <button data-dl="folder">Folder</button>
+        </div>
+        <div class="custom-row" id="folderRow" style="margin-top:8px; display:none">
+          <button class="btn" id="chooseFolder">Choose folder…</button>
+          <span class="name" id="folderName" style="color:var(--text-dim);font-size:12px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">none</span>
+        </div>
+
+        <div class="switch-row" style="margin-top:12px">
+          <span style="font-size:14px">Show recording progress</span>
+          <label class="switch"><input type="checkbox" id="showProgress" checked /><span class="slider-sw"></span></label>
+        </div>
+        <div class="switch-row" style="margin-top:10px">
+          <span style="font-size:14px">3-2-1 countdown before recording</span>
+          <label class="switch"><input type="checkbox" id="countdownToggle" checked /><span class="slider-sw"></span></label>
+        </div>
+
+        <p class="hint">Records the visual at the chosen resolution/orientation. Settings, play, record, progress and countdown are never captured. Output is an <b>MP4</b> (H.264) or <b>WebM</b> file. Recording plays the clip from the start and stops when it ends; use the pause button to pause/resume without adding paused time to the video.</p>
         <p class="hint"><b>Editor tip:</b> use <b>30 fps</b> for the most reliable import into DaVinci Resolve and similar editors. Browser recordings are variable-frame-rate; if an import still misbehaves, re-encode to constant frame rate, e.g. <code>ffmpeg -i in.mp4 -c:v libx264 -r 30 -pix_fmt yuv420p -c:a aac -b:a 192k out.mp4</code>.</p>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <span class="section-title">Presets (looks)</span>
+        <div class="custom-row">
+          <input type="text" id="presetName" placeholder="Preset name" style="flex:1" />
+          <button class="btn" id="savePreset">Save</button>
+        </div>
+        <div class="custom-row" style="margin-top:8px">
+          <select id="presetSelect" style="flex:1"><option value="">— saved presets —</option></select>
+          <button class="btn" id="loadPreset">Load</button>
+          <button class="btn" id="deletePreset">Delete</button>
+        </div>
+        <div class="custom-row" style="margin-top:10px">
+          <button class="btn" id="exportSettings" style="flex:1">Export settings</button>
+          <button class="btn" id="importSettings" style="flex:1">Import settings</button>
+          <input type="file" id="importFile" accept="application/json" style="display:none" />
+        </div>
+        <p class="hint">Presets save the full look (colors, shape, background, positions, resolution, etc.) on this browser. Export/Import moves settings between browsers or backs them up. The audio clip is never included.</p>
       </div>
 
       <p class="hint">Background & profile images and all appearance settings are remembered on this browser. The audio clip must be re-added each session.</p>
@@ -400,7 +517,8 @@
   <div id="toast"></div>
 
   <audio id="audioEl" crossorigin="anonymous"></audio>
-  <video id="bgVideo" muted loop playsinline crossorigin="anonymous" style="display:none"></video>
+  <video id="bgVideo" muted playsinline crossorigin="anonymous" style="display:none"></video>
+  <video id="bgVideoB" muted playsinline crossorigin="anonymous" style="display:none"></video>
 
 <script>
 "use strict";
@@ -421,6 +539,16 @@
   const pauseIcon = document.getElementById("pauseIcon");
   const recBtn = document.getElementById("recBtn");
   const recDot = document.getElementById("recDot");
+  const recLabel = document.getElementById("recLabel");
+  const recPauseBtn = document.getElementById("recPauseBtn");
+  const recPauseIcon = document.getElementById("recPauseIcon");
+  const recResumeIcon = document.getElementById("recResumeIcon");
+  const recProgress = document.getElementById("recProgress");
+  const recTime = document.getElementById("recTime");
+  const recBarFill = document.getElementById("recBarFill");
+  const countdownEl = document.getElementById("countdown");
+  const countdownNum = document.getElementById("countdownNum");
+  const focusWarn = document.getElementById("focusWarn");
   const toast = document.getElementById("toast");
 
   const audioInput = document.getElementById("audioInput");
@@ -447,6 +575,22 @@
   const includeAudioEl = document.getElementById("includeAudio");
   const formatSeg = document.getElementById("formatSeg");
   const fpsSeg = document.getElementById("fpsSeg");
+  const resSeg = document.getElementById("resSeg");
+  const resHint = document.getElementById("resHint");
+  const downloadSeg = document.getElementById("downloadSeg");
+  const folderRow = document.getElementById("folderRow");
+  const chooseFolderBtn = document.getElementById("chooseFolder");
+  const folderName = document.getElementById("folderName");
+  const showProgressEl = document.getElementById("showProgress");
+  const countdownToggle = document.getElementById("countdownToggle");
+  const presetNameEl = document.getElementById("presetName");
+  const savePresetBtn = document.getElementById("savePreset");
+  const presetSelect = document.getElementById("presetSelect");
+  const loadPresetBtn = document.getElementById("loadPreset");
+  const deletePresetBtn = document.getElementById("deletePreset");
+  const exportSettingsBtn = document.getElementById("exportSettings");
+  const importSettingsBtn = document.getElementById("importSettings");
+  const importFileEl = document.getElementById("importFile");
 
   const rotateToggle = document.getElementById("rotateToggle");
   const vignetteToggle = document.getElementById("vignetteToggle");
@@ -455,10 +599,15 @@
   const bgVideoInput = document.getElementById("bgVideoInput");
   const bgVideoName = document.getElementById("bgVideoName");
   const bgVideoEl = document.getElementById("bgVideo");
+  const bgVideoElB = document.getElementById("bgVideoB");
+  const bgVideos = [bgVideoEl, bgVideoElB];
+  let bgPrimary = 0; // index of the currently-playing (front) video
   const bgBlurEl = document.getElementById("bgBlur");
   const bgBlurVal = document.getElementById("bgBlurVal");
   const bgSpeedEl = document.getElementById("bgSpeed");
   const bgSpeedVal = document.getElementById("bgSpeedVal");
+  const bgLoopBlendEl = document.getElementById("bgLoopBlend");
+  const bgLoopBlendVal = document.getElementById("bgLoopBlendVal");
   const bgPresetsEl = document.getElementById("bgPresets");
   const circleSizeEl = document.getElementById("circleSize");
   const circleSizeVal = document.getElementById("circleSizeVal");
@@ -518,11 +667,16 @@
     includeAudio: true,
     videoFormat: "mp4",      // "mp4" | "webm"
     fps: 30,                 // capture frame rate (24 | 30 | 60)
+    resolution: "1080",      // short-side pixels: "720" | "1080" | "1440" | "2160"
+    downloadMode: "browser", // "browser" | "ask" | "folder"
+    showProgress: true,      // show recording progress overlay (UI only)
+    countdown: true,         // 3-2-1 countdown before recording
     vignette: true,          // dim + vignette the background
     vignetteStrength: 0.9,   // vignette density (0..1.5)
     rotate: true,            // spin the visualizer
     bgBlur: 0,               // background blur radius in px (0..40)
     bgVideoSpeed: 1,         // background video playback rate
+    bgLoopBlend: 0.6,        // seamless-loop crossfade length in seconds
     bgImageData: null,       // data URL
     profileImageData: null,  // data URL
     // background source: null (default placeholder) | "preset" | "image"
@@ -576,7 +730,7 @@
   // Audio graph
   // ---------------------------------------------------------------------------
   let audioCtx = null, analyser = null, srcNode = null, streamDest = null;
-  let freqData = null;
+  let freqData = null, timeData = null;
   let audioLoaded = false;
 
   function ensureAudioGraph() {
@@ -588,6 +742,7 @@
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.82;
     freqData = new Uint8Array(analyser.frequencyBinCount);
+    timeData = new Uint8Array(analyser.fftSize);
     streamDest = audioCtx.createMediaStreamDestination();
     srcNode.connect(analyser);
     analyser.connect(audioCtx.destination);   // to speakers
@@ -625,8 +780,20 @@
   // Layout
   // ---------------------------------------------------------------------------
   function applyAspect() {
-    if (state.aspect === "9:16") { canvas.width = 1080; canvas.height = 1920; }
-    else { canvas.width = 1920; canvas.height = 1080; }
+    const shortSide = parseInt(state.resolution, 10) || 1080;
+    let w, h;
+    if (state.aspect === "1:1") {
+      w = h = shortSide;
+    } else {
+      const longSide = Math.round(shortSide * 16 / 9 / 2) * 2; // keep even for H.264
+      if (state.aspect === "9:16") { w = shortSide; h = longSide; }
+      else { w = longSide; h = shortSide; } // 16:9
+    }
+    canvas.width = w;
+    canvas.height = h;
+    if (typeof resHint !== "undefined" && resHint) {
+      resHint.textContent = "Output: " + w + "×" + h + ". Higher resolutions (especially 4K) are heavier to record.";
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -682,6 +849,60 @@
     ctx.fillStyle = rg;
     ctx.fillRect(0, 0, W, H);
   }
+
+  // Draw a background image/video (cover-fit) with optional blur and alpha.
+  function drawBgMedia(media, W, H, alpha) {
+    ctx.globalAlpha = alpha;
+    if (state.bgBlur > 0) {
+      const overscan = 1 + state.bgBlur / 200; // hide transparent edges under blur
+      ctx.filter = "blur(" + state.bgBlur + "px)";
+      drawCover(media, W, H, state.bgScale * overscan, state.bgOffX, state.bgOffY);
+      ctx.filter = "none";
+    } else {
+      drawCover(media, W, H, state.bgScale, state.bgOffX, state.bgOffY);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Seamless video loop: near the end of the front clip, start the other clip from
+  // the top and crossfade so the last frames blend into the first frames (no cut).
+  function drawBackgroundVideo(W, H) {
+    const A = bgVideos[bgPrimary], B = bgVideos[1 - bgPrimary];
+    const dur = A.duration || 0;
+    let blend = state.bgLoopBlend;
+    if (dur) blend = Math.min(blend, dur * 0.45); // never overlap more than ~half the clip
+    const startAt = dur - Math.max(blend, 0.15);  // pre-roll the incoming clip to decode
+
+    if (dur && A.currentTime >= startAt && B.paused) {
+      try { B.currentTime = 0; } catch (e) { /* seek may be pending */ }
+      B.playbackRate = state.bgVideoSpeed;
+      B.play().catch(() => {});
+    }
+    let alphaB = 0;
+    if (blend > 0 && dur && A.currentTime >= dur - blend) {
+      alphaB = Math.min(1, (A.currentTime - (dur - blend)) / blend);
+    }
+    drawBgMedia(A, W, H, 1);
+    if (alphaB > 0 && B.readyState >= 2) drawBgMedia(B, W, H, alphaB);
+  }
+
+  // When the front clip ends, hand off to the clip that has been crossfading in.
+  function onBgVideoEnded(e) {
+    const v = e.target;
+    const other = (v === bgVideoEl) ? bgVideoElB : bgVideoEl;
+    v.pause();
+    try { v.currentTime = 0; } catch (err) { /* ignore */ }
+    if (!other.paused) {
+      bgPrimary = (other === bgVideoEl) ? 0 : 1; // other already crossfaded in
+    } else {
+      // No handoff happened (e.g. unknown duration) — just restart this clip.
+      bgPrimary = (v === bgVideoEl) ? 0 : 1;
+      try { v.currentTime = 0; } catch (err) { /* ignore */ }
+      v.play().catch(() => {});
+    }
+  }
+  bgVideoEl.addEventListener("ended", onBgVideoEnded);
+  bgVideoElB.addEventListener("ended", onBgVideoEnded);
 
   function smoothClosedPath(pts) {
     const n = pts.length;
@@ -780,6 +1001,64 @@
     ctx.globalAlpha = 1;
   }
 
+  // ---- shape: circular waveform (oscilloscope) ----
+  function drawWaveform(cx, cy, rInner, mags, rOuter, spin) {
+    if (!analyser || !timeData) return;
+    analyser.getByteTimeDomainData(timeData);
+    const n = 220;
+    const baseR = rInner + (rOuter - rInner) * 0.45;
+    const amp = (rOuter - rInner) * 0.42;
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const v = (timeData[Math.floor((i / n) * timeData.length)] - 128) / 128; // -1..1
+      const r = baseR + v * amp * state.sensitivity;
+      const a = (i / n) * TWO_PI + spin * 0.05;
+      pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+    ctx.strokeStyle = resolvePaint(cx, cy, rInner, rOuter);
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 3;
+    smoothClosedPath(pts);
+    ctx.stroke();
+  }
+
+  // ---- shape: mirrored bottom spectrum ----
+  function drawMirror(cx, cy, rInner, mags, rOuter, spin) {
+    const W = canvas.width, H = canvas.height;
+    const n = mags.length;
+    const barW = W / n;
+    const baseY = H * 0.86;
+    const maxH = H * 0.22;
+    ctx.fillStyle = resolvePaint(W / 2, baseY, 20, Math.max(W, H) * 0.5);
+    for (let i = 0; i < n; i++) {
+      const bh = mags[i] * maxH;
+      const x = i * barW;
+      ctx.globalAlpha = 0.95;
+      ctx.fillRect(x, baseY - bh, barW * 0.75, bh);          // rising bar
+      ctx.globalAlpha = 0.28;
+      ctx.fillRect(x, baseY + 2, barW * 0.75, bh * 0.6);     // reflection
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---- shape: particle ring ----
+  function drawParticles(cx, cy, rInner, mags, rOuter, spin) {
+    const n = mags.length;
+    ctx.fillStyle = resolvePaint(cx, cy, rInner, rOuter);
+    for (let i = 0; i < n; i++) {
+      const src = i < n / 2 ? i : n - 1 - i; // symmetric
+      const v = mags[src];
+      const a = (i / n) * TWO_PI + spin * 0.08;
+      const r = rInner + 10 + v * (rOuter - rInner);
+      const size = 1.5 + v * 7;
+      ctx.globalAlpha = 0.35 + v * 0.65;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, size, 0, TWO_PI);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // ---- center profile + glow ----
   function drawProfile(cx, cy, r, bass) {
     // reactive glow ring
@@ -826,10 +1105,18 @@
   // ---------------------------------------------------------------------------
   // Render loop
   // ---------------------------------------------------------------------------
-  let lastFrame = performance.now(), rotAcc = 0;
+  let lastFrame = performance.now(), rotAcc = 0, lastDraw = 0;
   function render() {
-    const W = canvas.width, H = canvas.height;
+    requestAnimationFrame(render);
     const now = performance.now();
+    // Frame-rate cap to limit CPU/GPU load (and knock-on impact on other tabs
+    // and the system). Full rate while playing/recording; throttled when idle.
+    const activeNow = isRecording || (audioEl && !audioEl.paused) ||
+      (state.bgSource === "video" && !bgVideos[bgPrimary].paused);
+    const targetFps = activeNow ? 60 : 24;
+    if (now - lastDraw < 1000 / targetFps - 1) return;
+    lastDraw = now;
+    const W = canvas.width, H = canvas.height;
     const dt = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
     if (state.rotate) rotAcc += dt;      // only advances while rotation is on
@@ -840,20 +1127,12 @@
     const rInner = rProfile * 1.18;
     const rOuter = minDim * 0.46;
 
-    // 1. background — video or image (with optional blur), else preset / placeholder
-    let bgMedia = null;
-    if (state.bgSource === "video" && bgVideoEl.readyState >= 2) bgMedia = bgVideoEl;
-    else if (state.bgSource === "image" && bgImg) bgMedia = bgImg;
-    if (bgMedia) {
-      if (state.bgBlur > 0) {
-        // overscan so the blur doesn't reveal transparent edges
-        const overscan = 1 + state.bgBlur / 200;
-        ctx.filter = "blur(" + state.bgBlur + "px)";
-        drawCover(bgMedia, W, H, state.bgScale * overscan, state.bgOffX, state.bgOffY);
-        ctx.filter = "none";
-      } else {
-        drawCover(bgMedia, W, H, state.bgScale, state.bgOffX, state.bgOffY);
-      }
+    // 1. background — video (seamless-loop crossfade) or image (optional blur),
+    //    else preset / placeholder
+    if (state.bgSource === "video" && bgVideos[bgPrimary].readyState >= 2) {
+      drawBackgroundVideo(W, H);
+    } else if (state.bgSource === "image" && bgImg) {
+      drawBgMedia(bgImg, W, H, 1);
     } else if (state.bgSource === "preset") {
       drawPresetBg(BG_PRESETS[state.bgPreset] || BG_PRESETS[0], W, H);
     } else {
@@ -882,19 +1161,24 @@
     ctx.shadowColor = "rgba(0,0,0,0.35)";
     if (state.shape === "blob") drawBlob(cx, cy, rInner, mags, rOuter, spin);
     else if (state.shape === "lines") drawLines(cx, cy, rInner, mags, rOuter, spin);
+    else if (state.shape === "wave") drawWaveform(cx, cy, rInner, mags, rOuter, spin);
+    else if (state.shape === "mirror") drawMirror(cx, cy, rInner, mags, rOuter, spin);
+    else if (state.shape === "particles") drawParticles(cx, cy, rInner, mags, rOuter, spin);
     else drawBars(cx, cy, rInner, mags, rOuter, spin);
     ctx.restore();
 
     // 5. profile
     drawProfile(cx, cy, rProfile, bass);
 
-    requestAnimationFrame(render);
+    // 6. UI-only recording progress (not on canvas)
+    updateRecProgress();
   }
 
   // ---------------------------------------------------------------------------
   // Recording
   // ---------------------------------------------------------------------------
   let mediaRecorder = null, recChunks = [], isRecording = false, recConfig = null;
+  let recPaused = false, counting = false, countdownTimer = null;
 
   // Picks the best recorder mime for the desired container, falling back to WebM
   // if MP4 recording isn't available. Returns the container actually chosen.
@@ -915,13 +1199,44 @@
     return { mimeType: "", ext: "webm", blobType: "video/webm" };
   }
 
+  // Entry point — runs the countdown (if enabled) then begins capture.
   function startRecording() {
+    if (isRecording || counting) return;
     if (!audioLoaded) { showToast("Add an audio clip first (Settings)"); return; }
     if (!canvas.captureStream) { showToast("Recording not supported in this browser"); return; }
-    ensureAudioGraph();
+    if (state.countdown) {
+      counting = true;
+      runCountdown(() => { counting = false; beginRecording(); });
+    } else {
+      beginRecording();
+    }
+  }
 
+  function runCountdown(done) {
+    let n = 3;
+    countdownEl.classList.add("show");
+    countdownNum.textContent = n;
+    bumpCountdown();
+    countdownTimer = setInterval(() => {
+      n--;
+      if (n <= 0) {
+        clearInterval(countdownTimer); countdownTimer = null;
+        countdownEl.classList.remove("show");
+        done();
+      } else {
+        countdownNum.textContent = n; bumpCountdown();
+      }
+    }, 800);
+  }
+  function bumpCountdown() {
+    countdownNum.style.animation = "none";
+    void countdownNum.offsetWidth; // reflow to restart the animation
+    countdownNum.style.animation = "cd-pop .8s ease-out";
+  }
+
+  function beginRecording() {
+    ensureAudioGraph();
     const videoStream = canvas.captureStream(state.fps);
-    const tracks = videoStream.getVideoTracks();
     if (state.includeAudio) {
       const aTracks = streamDest.stream.getAudioTracks();
       for (const tr of aTracks) videoStream.addTrack(tr);
@@ -946,34 +1261,159 @@
     audioEl.play();
     mediaRecorder.start(100);
 
-    isRecording = true;
+    isRecording = true; recPaused = false;
     recBtn.classList.add("recording");
-    recDot.classList.add("show");
+    recDot.classList.add("show"); recDot.classList.remove("paused");
+    recLabel.textContent = "REC";
+    recPauseBtn.classList.add("show");
+    recPauseIcon.style.display = "block"; recResumeIcon.style.display = "none";
+    if (state.showProgress) recProgress.classList.add("show");
     setPlayIcon(true);
   }
 
+  // Native pause/resume — paused time is excluded from the output, so recording
+  // duration is not affected. Audio is paused too, keeping visuals in sync.
+  function pauseRecording() {
+    if (!isRecording || recPaused) return;
+    if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.pause();
+    audioEl.pause();
+    recPaused = true;
+    recLabel.textContent = "PAUSED";
+    recDot.classList.add("paused");
+    recPauseIcon.style.display = "none"; recResumeIcon.style.display = "block";
+  }
+  function resumeRecording() {
+    if (!isRecording || !recPaused) return;
+    audioEl.play();
+    if (mediaRecorder && mediaRecorder.state === "paused") mediaRecorder.resume();
+    recPaused = false;
+    recLabel.textContent = "REC";
+    recDot.classList.remove("paused");
+    recPauseIcon.style.display = "block"; recResumeIcon.style.display = "none";
+  }
+
   function stopRecording() {
+    if (counting) { // cancel a running countdown
+      clearInterval(countdownTimer); countdownTimer = null; counting = false;
+      countdownEl.classList.remove("show");
+      return;
+    }
     if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
     audioEl.pause();
-    isRecording = false;
+    isRecording = false; recPaused = false;
     recBtn.classList.remove("recording");
-    recDot.classList.remove("show");
+    recDot.classList.remove("show"); recDot.classList.remove("paused");
+    recPauseBtn.classList.remove("show");
+    recProgress.classList.remove("show");
+    focusWarn.classList.remove("show");
     setPlayIcon(false);
   }
 
-  function finishRecording() {
+  function fmtTime(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+    return m + ":" + (ss < 10 ? "0" : "") + ss;
+  }
+  function updateRecProgress() {
+    if (!isRecording || !state.showProgress) return;
+    const cur = audioEl.currentTime || 0, dur = audioEl.duration || 0;
+    recTime.textContent = fmtTime(cur) + " / " + fmtTime(dur);
+    recBarFill.style.width = (dur ? Math.min(100, (cur / dur) * 100) : 0) + "%";
+  }
+
+  async function finishRecording() {
     const cfg = recConfig || { blobType: "video/webm", ext: "webm" };
     const blob = new Blob(recChunks, { type: cfg.blobType });
+    const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    await saveBlob(blob, "visualizer-" + ts + "." + cfg.ext);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Saving (browser download / ask each time / remembered folder)
+  // ---------------------------------------------------------------------------
+  const fsSupported = !!(window.showSaveFilePicker && window.showDirectoryPicker);
+  let dirHandle = null;
+  const IDB_NAME = "avs-store", IDB_STORE = "handles";
+
+  function idbOpen() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(IDB_NAME, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(IDB_STORE);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function idbSet(key, val) {
+    const db = await idbOpen();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put(val, key);
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+    });
+  }
+  async function idbGet(key) {
+    const db = await idbOpen();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const rq = tx.objectStore(IDB_STORE).get(key);
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+    });
+  }
+  async function ensureDirPermission() {
+    if (!dirHandle) return false;
+    const opts = { mode: "readwrite" };
+    if ((await dirHandle.queryPermission(opts)) === "granted") return true;
+    if ((await dirHandle.requestPermission(opts)) === "granted") return true;
+    return false;
+  }
+  async function chooseFolder() {
+    if (!window.showDirectoryPicker) { showToast("Folder saving isn't supported in this context"); return; }
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      try { await idbSet("dirHandle", dirHandle); } catch (e) { /* opaque origin (file://) can't persist */ }
+      folderName.textContent = dirHandle.name;
+      showToast("Folder set: " + dirHandle.name);
+    } catch (e) { if (e && e.name !== "AbortError") showToast("Could not set folder"); }
+  }
+  async function restoreDirHandle() {
+    try {
+      dirHandle = (await idbGet("dirHandle")) || null;
+      if (dirHandle) folderName.textContent = dirHandle.name;
+    } catch (e) { /* ignore */ }
+  }
+  function anchorDownload(blob, name) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
-    a.href = url;
-    a.download = "visualizer-" + ts + "." + cfg.ext;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    showToast("Saved " + a.download);
+  }
+  async function saveBlob(blob, name) {
+    const ext = name.split(".").pop();
+    try {
+      if (state.downloadMode === "folder" && dirHandle && (await ensureDirPermission())) {
+        const fh = await dirHandle.getFileHandle(name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob); await w.close();
+        showToast("Saved " + name + " → " + dirHandle.name);
+        return;
+      }
+      if (state.downloadMode === "ask" && window.showSaveFilePicker) {
+        const fh = await window.showSaveFilePicker({
+          suggestedName: name,
+          types: [{ description: "Video", accept: { [blob.type || "video/mp4"]: ["." + ext] } }],
+        });
+        const w = await fh.createWritable();
+        await w.write(blob); await w.close();
+        showToast("Saved " + fh.name);
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === "AbortError") { showToast("Save canceled"); return; }
+      console.warn("File System save failed, falling back to download:", e);
+    }
+    anchorDownload(blob, name);
+    showToast("Saved " + name);
   }
 
   // ---------------------------------------------------------------------------
@@ -1068,7 +1508,7 @@
       el.addEventListener("click", () => {
         state.bgSource = "preset";
         state.bgPreset = i;
-        bgVideoEl.pause();
+        bgVideoEl.pause(); bgVideoElB.pause();
         bgName.textContent = p.name;
         markActiveBgPreset();
         saveState();
@@ -1093,6 +1533,13 @@
     const b = e.target.closest("button"); if (!b) return;
     state.aspect = b.dataset.aspect;
     setSeg(aspectSeg, "aspect", state.aspect);
+    applyAspect();
+    saveState();
+  });
+  resSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.resolution = b.dataset.res;
+    setSeg(resSeg, "res", state.resolution);
     applyAspect();
     saveState();
   });
@@ -1142,6 +1589,87 @@
     setSeg(fpsSeg, "fps", b.dataset.fps);
     saveState();
   });
+  downloadSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b || b.disabled) return;
+    state.downloadMode = b.dataset.dl;
+    setSeg(downloadSeg, "dl", state.downloadMode);
+    folderRow.style.display = state.downloadMode === "folder" ? "flex" : "none";
+    if (state.downloadMode === "folder" && !dirHandle) showToast("Pick a folder with “Choose folder…”");
+    saveState();
+  });
+  chooseFolderBtn.addEventListener("click", chooseFolder);
+  showProgressEl.addEventListener("change", () => {
+    state.showProgress = showProgressEl.checked;
+    if (!state.showProgress) recProgress.classList.remove("show");
+    else if (isRecording) recProgress.classList.add("show");
+    saveState();
+  });
+  countdownToggle.addEventListener("change", () => { state.countdown = countdownToggle.checked; saveState(); });
+
+  // ---- Presets (named looks) + export/import ----
+  const PRESETS_KEY = "audioVisualizerStudio.presets";
+  function getPresets() { try { return JSON.parse(localStorage.getItem(PRESETS_KEY)) || {}; } catch (e) { return {}; } }
+  function setPresets(p) {
+    try { localStorage.setItem(PRESETS_KEY, JSON.stringify(p)); }
+    catch (e) { showToast("Could not save preset (storage full — try removing background images)"); }
+  }
+  function refreshPresetList() {
+    const p = getPresets();
+    presetSelect.innerHTML = '<option value="">— saved presets —</option>';
+    Object.keys(p).forEach((name) => {
+      const o = document.createElement("option");
+      o.value = name; o.textContent = name;
+      presetSelect.appendChild(o);
+    });
+  }
+  async function applyImportedState(obj) {
+    if (!obj || typeof obj !== "object") return;
+    Object.assign(state, obj);
+    if (state.bgSource === "video") state.bgSource = state.bgImageData ? "image" : null;
+    bgImg = null; profileImg = null; // let applyStateToUI reload from data URLs
+    await applyStateToUI();
+    saveState();
+  }
+  savePresetBtn.addEventListener("click", () => {
+    const name = (presetNameEl.value || "").trim();
+    if (!name) { showToast("Enter a preset name"); return; }
+    const p = getPresets();
+    p[name] = JSON.parse(JSON.stringify(state));
+    setPresets(p);
+    refreshPresetList();
+    presetSelect.value = name;
+    presetNameEl.value = "";
+    showToast("Preset saved: " + name);
+  });
+  loadPresetBtn.addEventListener("click", () => {
+    const name = presetSelect.value;
+    if (!name) { showToast("Pick a preset to load"); return; }
+    const p = getPresets();
+    if (p[name]) { applyImportedState(p[name]); showToast("Loaded preset: " + name); }
+  });
+  deletePresetBtn.addEventListener("click", () => {
+    const name = presetSelect.value;
+    if (!name) return;
+    const p = getPresets(); delete p[name]; setPresets(p);
+    refreshPresetList();
+    showToast("Deleted preset: " + name);
+  });
+  exportSettingsBtn.addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    anchorDownload(blob, "visualizer-settings.json");
+    showToast("Exported settings");
+  });
+  importSettingsBtn.addEventListener("click", () => importFileEl.click());
+  importFileEl.addEventListener("change", () => {
+    const f = importFileEl.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { applyImportedState(JSON.parse(reader.result)); showToast("Settings imported"); }
+      catch (e) { showToast("Invalid settings file"); }
+      importFileEl.value = "";
+    };
+    reader.readAsText(f);
+  });
   rotateToggle.addEventListener("change", () => { state.rotate = rotateToggle.checked; saveState(); });
   vignetteToggle.addEventListener("change", () => { state.vignette = vignetteToggle.checked; saveState(); });
   vignetteStrengthEl.addEventListener("input", () => {
@@ -1158,6 +1686,12 @@
     state.bgVideoSpeed = parseFloat(bgSpeedEl.value);
     bgSpeedVal.textContent = state.bgVideoSpeed.toFixed(2) + "×";
     if (bgVideoEl.readyState >= 1) bgVideoEl.playbackRate = state.bgVideoSpeed;
+    if (bgVideoElB.readyState >= 1) bgVideoElB.playbackRate = state.bgVideoSpeed;
+    saveState();
+  });
+  bgLoopBlendEl.addEventListener("input", () => {
+    state.bgLoopBlend = parseFloat(bgLoopBlendEl.value);
+    bgLoopBlendVal.textContent = state.bgLoopBlend.toFixed(2) + "s";
     saveState();
   });
 
@@ -1217,7 +1751,7 @@
     reader.onload = async () => {
       state.bgImageData = reader.result;
       state.bgSource = "image";
-      bgVideoEl.pause();
+      bgVideoEl.pause(); bgVideoElB.pause();
       bgImg = await loadImage(reader.result);
       bgName.textContent = f.name;
       markActiveBgPreset();
@@ -1227,8 +1761,13 @@
   });
   bgVideoInput.addEventListener("change", () => {
     const f = bgVideoInput.files[0]; if (!f) return;
-    bgVideoEl.src = URL.createObjectURL(f);
+    const url = URL.createObjectURL(f);
+    bgPrimary = 0;
+    bgVideoElB.pause();
+    bgVideoEl.src = url;
+    bgVideoElB.src = url;                       // same source, second playhead
     bgVideoEl.playbackRate = state.bgVideoSpeed;
+    bgVideoElB.playbackRate = state.bgVideoSpeed;
     bgVideoEl.play().catch(() => {});
     state.bgSource = "video";
     bgVideoName.textContent = f.name;
@@ -1236,6 +1775,7 @@
     saveState();
   });
   bgVideoEl.addEventListener("loadeddata", () => { bgVideoEl.playbackRate = state.bgVideoSpeed; });
+  bgVideoElB.addEventListener("loadeddata", () => { bgVideoElB.playbackRate = state.bgVideoSpeed; });
   profileInput.addEventListener("change", () => {
     const f = profileInput.files[0]; if (!f) return;
     const reader = new FileReader();
@@ -1253,7 +1793,21 @@
   closePanel.addEventListener("click", closePanelFn);
   overlay.addEventListener("click", closePanelFn);
   playBtn.addEventListener("click", togglePlay);
-  recBtn.addEventListener("click", () => { isRecording ? stopRecording() : startRecording(); });
+  recBtn.addEventListener("click", () => { (isRecording || counting) ? stopRecording() : startRecording(); });
+  recPauseBtn.addEventListener("click", () => { recPaused ? resumeRecording() : pauseRecording(); });
+  let bgVideoPausedByHide = false;
+  document.addEventListener("visibilitychange", () => {
+    if (isRecording && !recPaused && document.hidden) focusWarn.classList.add("show");
+    else focusWarn.classList.remove("show");
+    // Resource saving: stop the background-video decode while the tab is hidden
+    // (unless recording), so this tool uses ~0 resources in the background.
+    if (document.hidden) {
+      if (!isRecording && bgVideos.some((v) => !v.paused)) { bgVideos.forEach((v) => v.pause()); bgVideoPausedByHide = true; }
+    } else {
+      if (bgVideoPausedByHide && state.bgSource === "video") bgVideos[bgPrimary].play().catch(() => {});
+      bgVideoPausedByHide = false;
+    }
+  });
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT") return;
     if (e.code === "Space") { e.preventDefault(); togglePlay(); }
@@ -1265,12 +1819,23 @@
   // ---------------------------------------------------------------------------
   async function applyStateToUI() {
     setSeg(aspectSeg, "aspect", state.aspect);
+    setSeg(resSeg, "res", state.resolution);
     setSeg(shapeSeg, "shape", state.shape);
     setSeg(formatSeg, "format", state.videoFormat);
     setSeg(fpsSeg, "fps", String(state.fps));
     sensitivityEl.value = state.sensitivity; sensVal.textContent = (+state.sensitivity).toFixed(2);
     detailEl.value = state.detail; detailVal.textContent = state.detail;
     includeAudioEl.checked = state.includeAudio;
+    setSeg(downloadSeg, "dl", state.downloadMode);
+    folderRow.style.display = state.downloadMode === "folder" ? "flex" : "none";
+    showProgressEl.checked = state.showProgress;
+    countdownToggle.checked = state.countdown;
+    if (!fsSupported) {
+      downloadSeg.querySelectorAll('button[data-dl="ask"],button[data-dl="folder"]').forEach((b) => {
+        b.disabled = true; b.style.opacity = 0.45;
+        b.title = "Needs a browser with the File System Access API (works when the tool runs over a local server)";
+      });
+    }
     rotateToggle.checked = state.rotate;
     vignetteToggle.checked = state.vignette;
     vignetteStrengthEl.value = state.vignetteStrength;
@@ -1279,7 +1844,10 @@
     bgBlurVal.textContent = state.bgBlur + "px";
     bgSpeedEl.value = state.bgVideoSpeed;
     bgSpeedVal.textContent = (+state.bgVideoSpeed).toFixed(2) + "×";
+    bgLoopBlendEl.value = state.bgLoopBlend;
+    bgLoopBlendVal.textContent = (+state.bgLoopBlend).toFixed(2) + "s";
     bgVideoEl.playbackRate = state.bgVideoSpeed;
+    bgVideoElB.playbackRate = state.bgVideoSpeed;
     if (state.color.type === "gradient" && state.color.value.length >= 3) {
       grad1.value = state.color.value[0]; grad2.value = state.color.value[1]; grad3.value = state.color.value[2];
     } else if (state.color.type === "solid") {
@@ -1296,12 +1864,61 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Slider snapping — magnetic default/neutral positions + visible tick marks
+  // ---------------------------------------------------------------------------
+  const SNAP_CONFIG = {
+    sensitivity: [1],
+    detail: [96],
+    vignetteStrength: [0, 0.9],
+    bgBlur: [0],
+    bgSpeed: [1],
+    bgLoopBlend: [0.6],
+    circleSize: [0.14],
+    profileZoom: [1],
+    profileX: [0],
+    profileY: [0],
+    bgZoom: [1],
+    bgX: [0],
+    bgY: [0],
+  };
+  function snapValue(el) {
+    const min = parseFloat(el.min), max = parseFloat(el.max);
+    const snaps = (el.dataset.snap || "").split(",").map(Number);
+    const v = parseFloat(el.value);
+    const thresh = (max - min) * 0.045; // ~4.5% magnetic zone around each snap point
+    for (const s of snaps) {
+      if (Math.abs(v - s) <= thresh) { if (parseFloat(el.value) !== s) el.value = s; return; }
+    }
+  }
+  function initSnapping() {
+    Object.keys(SNAP_CONFIG).forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const snaps = SNAP_CONFIG[id];
+      el.dataset.snap = snaps.join(",");
+      const dl = document.createElement("datalist");   // tick marks
+      dl.id = "ticks-" + id;
+      snaps.forEach((s) => { const o = document.createElement("option"); o.value = s; dl.appendChild(o); });
+      el.parentNode.appendChild(dl);
+      el.setAttribute("list", dl.id);
+    });
+    // Capture phase so snapping runs before each slider's own input handler reads the value.
+    panel.addEventListener("input", (e) => {
+      const el = e.target;
+      if (el && el.tagName === "INPUT" && el.type === "range" && el.dataset.snap) snapValue(el);
+    }, true);
+  }
+
+  // ---------------------------------------------------------------------------
   // Init
   // ---------------------------------------------------------------------------
   loadState();
   buildSwatches();
   buildBgPresets();
   applyStateToUI();
+  refreshPresetList();
+  initSnapping();
+  restoreDirHandle();
   render();
 })();
 </script>
