@@ -404,6 +404,39 @@
       </div>
 
       <div class="section">
+        <span class="section-title">Particle overlay (FX)</span>
+        <label class="file-label" for="fxVideoInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18" opacity=".4"/><circle cx="12" cy="12" r="2"/><circle cx="6" cy="7" r="1"/><circle cx="18" cy="8" r="1"/><circle cx="7" cy="17" r="1"/><circle cx="17" cy="16" r="1"/></svg>
+          Overlay video <span class="name" id="fxVideoName">none</span>
+        </label>
+        <input type="file" id="fxVideoInput" class="file-input" accept="video/*" />
+        <button class="btn" id="fxRemove" style="margin-top:8px">Remove overlay</button>
+
+        <div class="sub-label" style="margin-top:12px">Blend mode</div>
+        <div class="seg" id="fxBlendSeg">
+          <button data-fxblend="screen" class="active">Screen</button>
+          <button data-fxblend="lighter">Add</button>
+          <button data-fxblend="color-dodge">Dodge</button>
+        </div>
+        <div class="sub-label">Opacity</div>
+        <div class="range-row">
+          <input type="range" id="fxOpacity" min="0" max="1" step="0.02" value="0.9" />
+          <span class="val" id="fxOpacityVal">90%</span>
+        </div>
+        <div class="sub-label">Speed</div>
+        <div class="range-row">
+          <input type="range" id="fxSpeed" min="0.25" max="2" step="0.05" value="1" />
+          <span class="val" id="fxSpeedVal">1.00&times;</span>
+        </div>
+        <div class="sub-label">Seamless loop blend</div>
+        <div class="range-row">
+          <input type="range" id="fxLoopBlend" min="0.1" max="2" step="0.05" value="0.6" />
+          <span class="val" id="fxLoopBlendVal">0.60s</span>
+        </div>
+        <p class="hint">Upload a particle/bokeh/light-leak clip. It composites over the whole scene with a dodge blend (black becomes transparent, bright pixels add light) and loops seamlessly. Captured in recordings. Re-add the clip each session.</p>
+      </div>
+
+      <div class="section">
         <span class="section-title">Visualizer shape</span>
         <div class="seg wrap" id="shapeSeg">
           <button data-shape="bars" class="active">Bars</button>
@@ -531,6 +564,8 @@
   <audio id="audioEl" crossorigin="anonymous"></audio>
   <video id="bgVideo" muted playsinline crossorigin="anonymous" style="display:none"></video>
   <video id="bgVideoB" muted playsinline crossorigin="anonymous" style="display:none"></video>
+  <video id="fxVideo" muted playsinline crossorigin="anonymous" style="display:none"></video>
+  <video id="fxVideoB" muted playsinline crossorigin="anonymous" style="display:none"></video>
 
 <script>
 "use strict";
@@ -614,12 +649,26 @@
   const bgVideoElB = document.getElementById("bgVideoB");
   const bgVideos = [bgVideoEl, bgVideoElB];
   let bgPrimary = 0; // index of the currently-playing (front) video
+  const fxVideoEl = document.getElementById("fxVideo");
+  const fxVideoElB = document.getElementById("fxVideoB");
+  const fxVideos = [fxVideoEl, fxVideoElB];
+  let fxPrimary = 0; // index of the currently-playing (front) FX video
   const bgBlurEl = document.getElementById("bgBlur");
   const bgBlurVal = document.getElementById("bgBlurVal");
   const bgSpeedEl = document.getElementById("bgSpeed");
   const bgSpeedVal = document.getElementById("bgSpeedVal");
   const bgLoopBlendEl = document.getElementById("bgLoopBlend");
   const bgLoopBlendVal = document.getElementById("bgLoopBlendVal");
+  const fxVideoInput = document.getElementById("fxVideoInput");
+  const fxVideoName = document.getElementById("fxVideoName");
+  const fxRemoveBtn = document.getElementById("fxRemove");
+  const fxBlendSeg = document.getElementById("fxBlendSeg");
+  const fxOpacityEl = document.getElementById("fxOpacity");
+  const fxOpacityVal = document.getElementById("fxOpacityVal");
+  const fxSpeedEl = document.getElementById("fxSpeed");
+  const fxSpeedVal = document.getElementById("fxSpeedVal");
+  const fxLoopBlendEl = document.getElementById("fxLoopBlend");
+  const fxLoopBlendVal = document.getElementById("fxLoopBlendVal");
   const bgPresetsEl = document.getElementById("bgPresets");
   const circleSizeEl = document.getElementById("circleSize");
   const circleSizeVal = document.getElementById("circleSizeVal");
@@ -689,6 +738,12 @@
     bgBlur: 0,               // background blur radius in px (0..40)
     bgVideoSpeed: 1,         // background video playback rate
     bgLoopBlend: 0.6,        // seamless-loop crossfade length in seconds
+    // particle overlay (FX) video
+    fxSource: null,          // null | "video"
+    fxBlend: "screen",       // "screen" | "lighter" (Add) | "color-dodge"
+    fxOpacity: 0.9,          // overlay strength 0..1
+    fxLoopBlend: 0.6,        // FX seamless-loop crossfade seconds
+    fxSpeed: 1,              // FX video playback rate
     bgImageData: null,       // data URL
     profileImageData: null,  // data URL
     // background source: null (default placeholder) | "preset" | "image"
@@ -720,6 +775,8 @@
       if (state.bgImageData && !state.bgSource) state.bgSource = "image";
       // a background video object URL cannot survive a reload — fall back
       if (state.bgSource === "video") state.bgSource = state.bgImageData ? "image" : null;
+      // an overlay (FX) video object URL cannot survive a reload either
+      if (state.fxSource === "video") state.fxSource = null;
     } catch (e) { /* ignore */ }
   }
 
@@ -915,6 +972,66 @@
   }
   bgVideoEl.addEventListener("ended", onBgVideoEnded);
   bgVideoElB.addEventListener("ended", onBgVideoEnded);
+
+  // ---- Particle overlay (FX) video — same seamless-loop crossfade, drawn on top
+  //      of the whole scene with a "dodge" (screen/add) blend so black vanishes. ----
+  let fxCanvas = null, fxCtx = null;
+  function drawCoverTo(g, img, W, H, alpha) {
+    const iw = img.videoWidth || img.naturalWidth || img.width;
+    const ih = img.videoHeight || img.naturalHeight || img.height;
+    if (!iw || !ih) return;
+    const ir = iw / ih, cr = W / H;
+    let dw, dh;
+    if (ir > cr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
+    g.globalAlpha = alpha;
+    g.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    g.globalAlpha = 1;
+  }
+  function drawFxVideo(W, H) {
+    const A = fxVideos[fxPrimary], B = fxVideos[1 - fxPrimary];
+    const dur = A.duration || 0;
+    let blend = state.fxLoopBlend;
+    if (dur) blend = Math.min(blend, dur * 0.45);
+    const startAt = dur - Math.max(blend, 0.15);
+    if (dur && A.currentTime >= startAt && B.paused) {
+      try { B.currentTime = 0; } catch (e) { /* seek may be pending */ }
+      B.playbackRate = state.fxSpeed;
+      B.play().catch(() => {});
+    }
+    let alphaB = 0;
+    if (blend > 0 && dur && A.currentTime >= dur - blend) {
+      alphaB = Math.min(1, (A.currentTime - (dur - blend)) / blend);
+    }
+    // Composite the crossfade in an offscreen buffer first (normal alpha), then
+    // blend the single result over the scene once — avoids a brightness pulse at
+    // the loop point that back-to-back screen draws would cause.
+    if (!fxCanvas) { fxCanvas = document.createElement("canvas"); fxCtx = fxCanvas.getContext("2d"); }
+    if (fxCanvas.width !== W || fxCanvas.height !== H) { fxCanvas.width = W; fxCanvas.height = H; }
+    fxCtx.globalCompositeOperation = "source-over";
+    fxCtx.clearRect(0, 0, W, H);
+    drawCoverTo(fxCtx, A, W, H, 1);
+    if (alphaB > 0 && B.readyState >= 2) drawCoverTo(fxCtx, B, W, H, alphaB);
+    ctx.save();
+    ctx.globalCompositeOperation = state.fxBlend; // screen / lighter (add) / color-dodge
+    ctx.globalAlpha = state.fxOpacity;
+    ctx.drawImage(fxCanvas, 0, 0);
+    ctx.restore();
+  }
+  function onFxVideoEnded(e) {
+    const v = e.target;
+    const other = (v === fxVideoEl) ? fxVideoElB : fxVideoEl;
+    v.pause();
+    try { v.currentTime = 0; } catch (err) { /* ignore */ }
+    if (!other.paused) {
+      fxPrimary = (other === fxVideoEl) ? 0 : 1;
+    } else {
+      fxPrimary = (v === fxVideoEl) ? 0 : 1;
+      try { v.currentTime = 0; } catch (err) { /* ignore */ }
+      v.play().catch(() => {});
+    }
+  }
+  fxVideoEl.addEventListener("ended", onFxVideoEnded);
+  fxVideoElB.addEventListener("ended", onFxVideoEnded);
 
   function smoothClosedPath(pts) {
     const n = pts.length;
@@ -1135,7 +1252,8 @@
     // Frame-rate cap to limit CPU/GPU load (and knock-on impact on other tabs
     // and the system). Full rate while playing/recording; throttled when idle.
     const activeNow = isRecording || (audioEl && !audioEl.paused) ||
-      (state.bgSource === "video" && !bgVideos[bgPrimary].paused);
+      (state.bgSource === "video" && !bgVideos[bgPrimary].paused) ||
+      (state.fxSource === "video" && !fxVideos[fxPrimary].paused);
     const targetFps = activeNow ? 60 : 24;
     if (now - lastDraw < 1000 / targetFps - 1) return;
     lastDraw = now;
@@ -1197,7 +1315,12 @@
     // 5. profile
     drawProfile(cx, cy, rProfile, bass);
 
-    // 6. UI-only recording progress (not on canvas)
+    // 6. particle overlay (FX) — composited over everything with a dodge blend
+    if (state.fxSource === "video" && fxVideos[fxPrimary].readyState >= 2) {
+      drawFxVideo(W, H);
+    }
+
+    // 7. UI-only recording progress (not on canvas)
     updateRecProgress();
   }
 
@@ -1803,6 +1926,53 @@
   });
   bgVideoEl.addEventListener("loadeddata", () => { bgVideoEl.playbackRate = state.bgVideoSpeed; });
   bgVideoElB.addEventListener("loadeddata", () => { bgVideoElB.playbackRate = state.bgVideoSpeed; });
+
+  // ---- Particle overlay (FX) controls ----
+  fxVideoInput.addEventListener("change", () => {
+    const f = fxVideoInput.files[0]; if (!f) return;
+    const url = URL.createObjectURL(f);
+    fxPrimary = 0;
+    fxVideoElB.pause();
+    fxVideoEl.src = url;
+    fxVideoElB.src = url;
+    fxVideoEl.playbackRate = state.fxSpeed;
+    fxVideoElB.playbackRate = state.fxSpeed;
+    fxVideoEl.play().catch(() => {});
+    state.fxSource = "video";
+    fxVideoName.textContent = f.name;
+    saveState();
+  });
+  fxVideoEl.addEventListener("loadeddata", () => { fxVideoEl.playbackRate = state.fxSpeed; });
+  fxVideoElB.addEventListener("loadeddata", () => { fxVideoElB.playbackRate = state.fxSpeed; });
+  fxRemoveBtn.addEventListener("click", () => {
+    state.fxSource = null;
+    fxVideos.forEach((v) => { v.pause(); v.removeAttribute("src"); v.load(); });
+    fxVideoName.textContent = "none";
+    fxVideoInput.value = "";
+    saveState();
+  });
+  fxBlendSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.fxBlend = b.dataset.fxblend;
+    setSeg(fxBlendSeg, "fxblend", state.fxBlend);
+    saveState();
+  });
+  fxOpacityEl.addEventListener("input", () => {
+    state.fxOpacity = parseFloat(fxOpacityEl.value);
+    fxOpacityVal.textContent = Math.round(state.fxOpacity * 100) + "%";
+    saveState();
+  });
+  fxSpeedEl.addEventListener("input", () => {
+    state.fxSpeed = parseFloat(fxSpeedEl.value);
+    fxSpeedVal.textContent = state.fxSpeed.toFixed(2) + "×";
+    fxVideos.forEach((v) => { if (v.readyState >= 1) v.playbackRate = state.fxSpeed; });
+    saveState();
+  });
+  fxLoopBlendEl.addEventListener("input", () => {
+    state.fxLoopBlend = parseFloat(fxLoopBlendEl.value);
+    fxLoopBlendVal.textContent = state.fxLoopBlend.toFixed(2) + "s";
+    saveState();
+  });
   profileInput.addEventListener("change", () => {
     const f = profileInput.files[0]; if (!f) return;
     const reader = new FileReader();
@@ -1822,17 +1992,19 @@
   playBtn.addEventListener("click", togglePlay);
   recBtn.addEventListener("click", () => { (isRecording || counting) ? stopRecording() : startRecording(); });
   recPauseBtn.addEventListener("click", () => { recPaused ? resumeRecording() : pauseRecording(); });
-  let bgVideoPausedByHide = false;
+  let bgVideoPausedByHide = false, fxVideoPausedByHide = false;
   document.addEventListener("visibilitychange", () => {
     if (isRecording && !recPaused && document.hidden) focusWarn.classList.add("show");
     else focusWarn.classList.remove("show");
-    // Resource saving: stop the background-video decode while the tab is hidden
-    // (unless recording), so this tool uses ~0 resources in the background.
+    // Resource saving: stop background & overlay video decode while the tab is
+    // hidden (unless recording), so this tool uses ~0 resources in the background.
     if (document.hidden) {
       if (!isRecording && bgVideos.some((v) => !v.paused)) { bgVideos.forEach((v) => v.pause()); bgVideoPausedByHide = true; }
+      if (!isRecording && fxVideos.some((v) => !v.paused)) { fxVideos.forEach((v) => v.pause()); fxVideoPausedByHide = true; }
     } else {
       if (bgVideoPausedByHide && state.bgSource === "video") bgVideos[bgPrimary].play().catch(() => {});
-      bgVideoPausedByHide = false;
+      if (fxVideoPausedByHide && state.fxSource === "video") fxVideos[fxPrimary].play().catch(() => {});
+      bgVideoPausedByHide = false; fxVideoPausedByHide = false;
     }
   });
   window.addEventListener("keydown", (e) => {
@@ -1875,6 +2047,13 @@
     bgLoopBlendVal.textContent = (+state.bgLoopBlend).toFixed(2) + "s";
     bgVideoEl.playbackRate = state.bgVideoSpeed;
     bgVideoElB.playbackRate = state.bgVideoSpeed;
+    setSeg(fxBlendSeg, "fxblend", state.fxBlend);
+    fxOpacityEl.value = state.fxOpacity;
+    fxOpacityVal.textContent = Math.round(state.fxOpacity * 100) + "%";
+    fxSpeedEl.value = state.fxSpeed;
+    fxSpeedVal.textContent = (+state.fxSpeed).toFixed(2) + "×";
+    fxLoopBlendEl.value = state.fxLoopBlend;
+    fxLoopBlendVal.textContent = (+state.fxLoopBlend).toFixed(2) + "s";
     if (state.color.type === "gradient" && state.color.value.length >= 3) {
       grad1.value = state.color.value[0]; grad2.value = state.color.value[1]; grad3.value = state.color.value[2];
     } else if (state.color.type === "solid") {
@@ -1900,6 +2079,9 @@
     bgBlur: [0],
     bgSpeed: [1],
     bgLoopBlend: [0.6],
+    fxOpacity: [0.9],
+    fxSpeed: [1],
+    fxLoopBlend: [0.6],
     circleSize: [0.14],
     profileZoom: [1],
     profileX: [0],

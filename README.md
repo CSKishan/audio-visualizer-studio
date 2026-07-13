@@ -10,6 +10,7 @@ Everything the video shows is drawn on one `<canvas>`; the on-screen controls si
 - **Six visualizer styles** — radial bars, morphing solid blob, smooth curve lines, circular waveform, mirrored bottom spectrum, and a particle ring.
 - **Full color control** — preset solid colors, preset gradients, custom color, or custom multi-stop gradient.
 - **Backgrounds** — upload an image or a **video**, or pick from 13 built-in presets (8 dark + 5 light); background blur, video speed, **seamless crossfade looping** (the video's end blends into its start — no visible cut), and adjustable vignette density.
+- **Particle overlay (FX)** — upload a particle / bokeh / light-leak clip that composites over the whole scene with a **dodge blend** (Screen / Add / Color Dodge — black becomes transparent, bright pixels add light), with opacity and speed controls, seamless crossfade looping, and it's captured in recordings.
 - **Positioning** — zoom and pan both the profile picture and the background; resize the central circle. Sliders **snap** to their neutral/default positions (marked with tick marks) so it's easy to re-center.
 - **Orientation & resolution** — **16:9 / 9:16 / 1:1**, output at **720p / 1080p / 1440p / 4K**.
 - **Recording** — capture the composition at the chosen resolution as **MP4 (H.264)** or **WebM**, at **24 / 30 / 60 fps**, with optional embedded audio.
