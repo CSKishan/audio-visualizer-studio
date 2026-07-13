@@ -17,6 +17,7 @@ Everything the video shows is drawn on one `<canvas>`; the on-screen controls si
   - **Pause/resume** mid-recording (paused time is excluded from the video).
   - **Save destination** — normal browser download, **ask each time**, or **auto-save to a remembered folder** (File System Access API, with graceful fallback).
   - **On-screen recording progress** and a **3-2-1 countdown** — both helpers are excluded from the video.
+  - **⚡ Fast export** — render the whole clip **offline, faster than real-time** (no waiting the full duration); the file still plays at normal **1× length**. Uses WebCodecs + an inlined muxer; works with **still backgrounds** (image/preset) in Chromium browsers, and falls back to real-time recording when a background/overlay video is in use or WebCodecs is unavailable.
 - **Look presets** — save/load named looks, and export/import all settings as a `.json` file.
 - **Persistence** — background, profile, and all appearance settings are remembered across reloads (via `localStorage`).
 - **Lightweight when idle/backgrounded** — the render loop is frame-rate capped (throttled further when idle), and the background video is paused while the tab is hidden, so the tool stays easy on your CPU/GPU and doesn't bog down other tabs.
@@ -51,6 +52,7 @@ That's it.
 - **Where files save** (Settings → Recording → *Save recordings to*): **Browser** (default download), **Ask each time** (native Save dialog), or **Folder** (auto-save to a folder you pick once). The Ask/Folder modes use the File System Access API and fall back to a normal download when unavailable (e.g. when the page is opened directly as a `file://` file rather than over a local server).
 - **Progress readout** and the **3-2-1 countdown** are on-screen helpers only — they're never in the recording. Both can be toggled off.
 - **Look presets:** save a named look and reload it later, or **Export/Import** all settings as a `.json` file to move them between machines.
+- **Fast export** (Settings → Recording → *⚡ Fast export*) renders offline as fast as your machine can encode and outputs a correct-length 1× file. MP4 fast-export needs the browser's AAC encoder (recent Chrome/Edge); where that isn't available it exports **WebM (VP9/Opus)**. It uses the MIT-licensed [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer) and [`webm-muxer`](https://github.com/Vanilagy/webm-muxer), inlined into `index.html`.
 
 ### Editor compatibility (DaVinci Resolve, etc.)
 
