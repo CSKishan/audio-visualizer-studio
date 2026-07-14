@@ -533,9 +533,13 @@
           <span style="font-size:14px">⚡ Fast export (faster than real-time)</span>
           <label class="switch"><input type="checkbox" id="fastExportToggle" /><span class="slider-sw"></span></label>
         </div>
+        <div class="switch-row" style="margin-top:10px">
+          <span style="font-size:14px">Mute audio while recording</span>
+          <label class="switch"><input type="checkbox" id="muteRecToggle" /><span class="slider-sw"></span></label>
+        </div>
 
-        <p class="hint">Records the visual at the chosen resolution/orientation. Settings, play, record, progress and countdown are never captured. Output is an <b>MP4</b> (H.264) or <b>WebM</b> file. Recording plays the clip from the start and stops when it ends; use the pause button to pause/resume without adding paused time to the video.</p>
-        <p class="hint"><b>Fast export</b> renders the whole clip offline as quickly as your machine can encode (no need to wait the full duration) and the file still plays at normal 1× length. Works with <b>still backgrounds</b> (image / preset) and needs a Chromium browser; if a background/overlay <b>video</b> is in use it falls back to normal real-time recording.</p>
+        <p class="hint">Records the visual at the chosen resolution/orientation. Settings, play, record, progress and countdown are never captured. Output is an <b>MP4</b> (H.264) or <b>WebM</b> file. Recording plays the clip from the start and stops when it ends; use the pause button to pause/resume without adding paused time to the video. <b>Mute audio while recording</b> stops it playing through your speakers (the file still gets the audio) — handy for video backgrounds; note real-time recording only renders in the <b>foreground</b>, so for hands-off/background use prefer Fast export. Only your loaded clip is ever recorded — other tabs (e.g. Spotify) are never captured.</p>
+        <p class="hint"><b>Fast export</b> renders the whole clip offline as quickly as your machine can encode (no need to wait the full duration) and the file still plays at normal 1× length. It is <b>silent</b> (nothing plays through your speakers) and <b>keeps running in a background tab</b> — start it, then switch tabs or listen to Spotify freely. Works with <b>still backgrounds</b> (image / preset) and needs a Chromium browser; if a background/overlay <b>video</b> is in use it falls back to normal real-time recording. Tip: for hands-off background exports use the <b>Browser</b> save mode (the Ask/Folder dialog can't open while the tab is hidden).</p>
         <p class="hint"><b>Editor tip:</b> use <b>30 fps</b> for the most reliable import into DaVinci Resolve and similar editors. Browser recordings are variable-frame-rate; if an import still misbehaves, re-encode to constant frame rate, e.g. <code>ffmpeg -i in.mp4 -c:v libx264 -r 30 -pix_fmt yuv420p -c:a aac -b:a 192k out.mp4</code>.</p>
       </div>
 
@@ -655,6 +659,7 @@
   const showProgressEl = document.getElementById("showProgress");
   const countdownToggle = document.getElementById("countdownToggle");
   const fastExportToggle = document.getElementById("fastExportToggle");
+  const muteRecToggle = document.getElementById("muteRecToggle");
   const presetNameEl = document.getElementById("presetName");
   const savePresetBtn = document.getElementById("savePreset");
   const presetSelect = document.getElementById("presetSelect");
@@ -755,6 +760,7 @@
     fps: 30,                 // capture frame rate (24 | 30 | 60)
     resolution: "1080",      // short-side pixels: "720" | "1080" | "1440" | "2160"
     fastExport: false,       // offline faster-than-real-time export (still backgrounds)
+    muteWhileRecording: false, // real-time recording: don't play audio through speakers
     downloadMode: "browser", // "browser" | "ask" | "folder"
     showProgress: true,      // show recording progress overlay (UI only)
     countdown: true,         // 3-2-1 countdown before recording
@@ -824,7 +830,7 @@
   // ---------------------------------------------------------------------------
   // Audio graph
   // ---------------------------------------------------------------------------
-  let audioCtx = null, analyser = null, srcNode = null, streamDest = null;
+  let audioCtx = null, analyser = null, srcNode = null, streamDest = null, monitorGain = null;
   let freqData = null, timeData = null;
   let audioLoaded = false;
 
@@ -839,9 +845,11 @@
     freqData = new Uint8Array(analyser.frequencyBinCount);
     timeData = new Uint8Array(analyser.fftSize);
     streamDest = audioCtx.createMediaStreamDestination();
+    monitorGain = audioCtx.createGain();      // speaker monitor level (0 = silent)
     srcNode.connect(analyser);
-    analyser.connect(audioCtx.destination);   // to speakers
-    analyser.connect(streamDest);             // for recording
+    analyser.connect(monitorGain);
+    monitorGain.connect(audioCtx.destination); // to speakers (mutable)
+    analyser.connect(streamDest);             // for recording (always full)
   }
 
   // Smoothed magnitude buffer for pleasant, non-jittery motion
@@ -1441,6 +1449,9 @@
     mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
     mediaRecorder.onstop = finishRecording;
 
+    // Mute the speaker monitor if requested (the file still gets full audio via streamDest)
+    if (monitorGain) monitorGain.gain.value = state.muteWhileRecording ? 0 : 1;
+
     // Restart the clip so the whole song is captured
     audioCtx.resume();
     audioEl.currentTime = 0;
@@ -1486,6 +1497,7 @@
     }
     if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
     audioEl.pause();
+    if (monitorGain) monitorGain.gain.value = 1; // restore speaker monitor for preview
     isRecording = false; recPaused = false;
     recBtn.classList.remove("recording");
     recDot.classList.remove("show"); recDot.classList.remove("paused");
@@ -1610,6 +1622,13 @@
   let exporting = false;
   let audioFile = null, audioBuffer = null;
 
+  // Yield to the event loop WITHOUT setTimeout's ~1s clamp in background tabs, so the
+  // offline export keeps running at full speed even when the tab is hidden.
+  const _tickCh = new MessageChannel();
+  let _tickQ = [];
+  _tickCh.port1.onmessage = () => { const r = _tickQ.shift(); if (r) r(); };
+  function nextTick() { return new Promise((res) => { _tickQ.push(res); _tickCh.port2.postMessage(0); }); }
+
   // Iterative radix-2 FFT, in place. re/im are Float32Array of length n (power of 2).
   function fft(re, im) {
     const n = re.length;
@@ -1709,6 +1728,11 @@
     if (exporting) return;
     const buf = await ensureAudioBuffer();
     if (!buf) { showToast("Add an audio clip first"); return; }
+    if (state.downloadMode !== "browser") {
+      showToast("Exporting silently — return to this tab when done to confirm the save dialog");
+    } else {
+      showToast("Exporting silently — you can switch tabs; it keeps running in the background");
+    }
 
     const fps = state.fps, W = canvas.width, H = canvas.height;
     const sampleRate = buf.sampleRate;
@@ -1780,8 +1804,8 @@
         const frame = new VideoFrame(canvas, { timestamp: Math.round((N * 1e6) / fps), duration: Math.round(1e6 / fps) });
         vEnc.encode(frame, { keyFrame: N % (fps * 2) === 0 });
         frame.close();
-        while (vEnc.encodeQueueSize > 8) await new Promise((r) => setTimeout(r, 3)); // backpressure
-        if (N % 5 === 0) { showExportProgress(N, totalFrames); await new Promise((r) => setTimeout(r, 0)); }
+        while (vEnc.encodeQueueSize > 8) await nextTick(); // backpressure (not throttled when hidden)
+        if (N % 5 === 0) { showExportProgress(N, totalFrames); await nextTick(); }
       }
       await vEnc.flush(); await aEnc.flush(); muxer.finalize();
       const blob = new Blob([target.buffer], { type: mime });
@@ -1986,6 +2010,12 @@
   fastExportToggle.addEventListener("change", () => {
     state.fastExport = fastExportToggle.checked;
     if (state.fastExport && !fastSupported()) showToast("Heads up: this browser lacks WebCodecs — fast export will fall back to real-time");
+    saveState();
+  });
+  muteRecToggle.addEventListener("change", () => {
+    state.muteWhileRecording = muteRecToggle.checked;
+    // apply live if a real-time recording is in progress
+    if (monitorGain && isRecording) monitorGain.gain.value = state.muteWhileRecording ? 0 : 1;
     saveState();
   });
 
@@ -2265,6 +2295,7 @@
     showProgressEl.checked = state.showProgress;
     countdownToggle.checked = state.countdown;
     fastExportToggle.checked = state.fastExport;
+    muteRecToggle.checked = state.muteWhileRecording;
     if (!fsSupported) {
       downloadSeg.querySelectorAll('button[data-dl="ask"],button[data-dl="folder"]').forEach((b) => {
         b.disabled = true; b.style.opacity = 0.45;
