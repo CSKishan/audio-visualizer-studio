@@ -156,6 +156,45 @@
     margin-bottom: 9px; font-weight: 600;
   }
 
+  /* ---- Collapsible settings sections (accordion cards) ---- */
+  .panel-body > .divider { display: none; } /* cards replace dividers */
+  .section.collapsible {
+    margin-bottom: 8px; padding: 0;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--panel-bg-2); overflow: hidden;
+  }
+  .section.collapsible > .section-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 0; padding: 13px 14px; cursor: pointer; user-select: none;
+    color: var(--text); text-transform: none; letter-spacing: 0; font-size: 13.5px;
+  }
+  .section.collapsible > .section-head:hover { background: rgba(255,255,255,0.03); }
+  .section.collapsible > .section-head .caret {
+    color: var(--text-dim); font-size: 11px; transition: transform .15s ease;
+  }
+  .section.collapsible:not(.collapsed) > .section-head .caret { transform: rotate(90deg); }
+  .section.collapsible > .section-body { padding: 0 14px 14px; }
+  .section.collapsible.collapsed > .section-body { display: none; }
+
+  /* ---- Batch queue list ---- */
+  .batch-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .batch-empty { font-size: 12px; color: var(--text-dim); padding: 4px 2px; }
+  .batch-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 8px;
+    background: var(--panel-bg); border: 1px solid var(--border);
+  }
+  .batch-idx {
+    flex: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .batch-names { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .batch-img { color: var(--text-dim); }
+  .batch-img.dim { opacity: .7; font-style: italic; }
+  .batch-x { flex: none; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; }
+  .batch-x:hover { color: var(--danger); }
+
   .file-input { display: none; }
   .file-label {
     display: flex; align-items: center; gap: 10px;
@@ -546,6 +585,32 @@
       <div class="divider"></div>
 
       <div class="section">
+        <span class="section-title">Batch queue</span>
+        <label class="file-label" for="batchAudioInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          Add audio files <span class="name">up to 10</span>
+        </label>
+        <input type="file" id="batchAudioInput" class="file-input" accept="audio/*" multiple />
+        <label class="file-label" for="batchImageInput" style="margin-top:8px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          Add background images <span class="name">paired in order</span>
+        </label>
+        <input type="file" id="batchImageInput" class="file-input" accept="image/*" multiple />
+
+        <div id="batchList" class="batch-list"></div>
+
+        <div class="custom-row" style="margin-top:10px">
+          <button class="btn" id="batchFolder">Save folder…</button>
+          <span class="name" id="batchFolderName" style="color:var(--text-dim);font-size:12px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">none</span>
+        </div>
+        <button class="btn primary" id="batchExport" style="margin-top:10px;width:100%" disabled>Batch export</button>
+        <button class="btn" id="batchClear" style="margin-top:8px;width:100%">Clear queue</button>
+        <p class="hint">Queue up to 10 audio files, each optionally paired (in order) with a background image — item 1 uses image 1, and so on. <b>Batch export</b> renders each as its own video using your current look, named <b>&lt;audio&gt;-vid</b>, saved to the chosen folder (or downloaded). Uses the offline engine (Chromium) — silent and runs in the background.</p>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
         <span class="section-title">Presets (looks)</span>
         <div class="custom-row">
           <input type="text" id="presetName" placeholder="Preset name" style="flex:1" />
@@ -668,6 +733,13 @@
   const exportSettingsBtn = document.getElementById("exportSettings");
   const importSettingsBtn = document.getElementById("importSettings");
   const importFileEl = document.getElementById("importFile");
+  const batchAudioInput = document.getElementById("batchAudioInput");
+  const batchImageInput = document.getElementById("batchImageInput");
+  const batchListEl = document.getElementById("batchList");
+  const batchFolderBtn = document.getElementById("batchFolder");
+  const batchFolderName = document.getElementById("batchFolderName");
+  const batchExportBtn = document.getElementById("batchExport");
+  const batchClearBtn = document.getElementById("batchClear");
 
   const rotateToggle = document.getElementById("rotateToggle");
   const vignetteToggle = document.getElementById("vignetteToggle");
@@ -1576,7 +1648,7 @@
   async function restoreDirHandle() {
     try {
       dirHandle = (await idbGet("dirHandle")) || null;
-      if (dirHandle) folderName.textContent = dirHandle.name;
+      if (dirHandle) { folderName.textContent = dirHandle.name; if (batchFolderName) batchFolderName.textContent = dirHandle.name; }
     } catch (e) { /* ignore */ }
   }
   function anchorDownload(blob, name) {
@@ -1619,8 +1691,9 @@
   // Renders each frame deterministically with an explicit timestamp, so the file
   // is always the correct length at 1× no matter how fast the machine encodes.
   // ---------------------------------------------------------------------------
-  let exporting = false;
+  let exporting = false, batchRunning = false;
   let audioFile = null, audioBuffer = null;
+  let batchQueue = []; // [{ audioFile, audioName, image (HTMLImageElement|null), imageName }]
 
   // Yield to the event loop WITHOUT setTimeout's ~1s clamp in background tabs, so the
   // offline export keeps running at full speed even when the tab is hidden.
@@ -1724,16 +1797,9 @@
     recLabel.textContent = "REC";
   }
 
-  async function fastExport() {
-    if (exporting) return;
-    const buf = await ensureAudioBuffer();
-    if (!buf) { showToast("Add an audio clip first"); return; }
-    if (state.downloadMode !== "browser") {
-      showToast("Exporting silently — return to this tab when done to confirm the save dialog");
-    } else {
-      showToast("Exporting silently — you can switch tabs; it keeps running in the background");
-    }
-
+  // Core offline encoder — renders `buf` through drawScene() (current look + whatever
+  // background is set) and returns { blob, ext }. Reused by single + batch export.
+  async function encodeClip(buf, progressCb) {
     const fps = state.fps, W = canvas.width, H = canvas.height;
     const sampleRate = buf.sampleRate;
     const totalFrames = Math.max(1, Math.ceil(buf.duration * fps));
@@ -1764,57 +1830,164 @@
       vCodec = (await ok(VideoEncoder, { codec: "vp09.00.10.08", width: W, height: H, bitrate: 12e6 })) ? "vp09.00.10.08" : "vp8";
       mvCodec = vCodec === "vp8" ? "V_VP8" : "V_VP9"; aCodec = "opus"; maCodec = "A_OPUS";
       ext = "webm"; mime = "video/webm";
-      if (state.videoFormat === "mp4") showToast("MP4 fast export unavailable here — exporting WebM");
     } else {
-      showToast("Fast export unavailable — recording in real time"); beginRecording(); return;
+      throw new Error("no-muxer");
     }
 
+    const target = new MuxerNS.ArrayBufferTarget();
+    const muxer = new MuxerNS.Muxer({
+      target,
+      video: { codec: mvCodec, width: W, height: H, frameRate: fps },
+      audio: { codec: maCodec, numberOfChannels: chCount, sampleRate },
+      firstTimestampBehavior: "offset",
+      fastStart: ext === "mp4" ? "in-memory" : undefined,
+    });
+    const vEnc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => console.error("video", e) });
+    vEnc.configure(Object.assign({ codec: vCodec, width: W, height: H, bitrate: 12e6, framerate: fps }, avcOpt));
+    const aEnc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => console.error("audio", e) });
+    aEnc.configure({ codec: aCodec, sampleRate, numberOfChannels: chCount, bitrate: 192000 });
+
+    // encode audio (planar f32 in chunks)
+    const chans = []; for (let c = 0; c < chCount; c++) chans.push(buf.getChannelData(c));
+    const A = 4096;
+    for (let off = 0; off < buf.length; off += A) {
+      const num = Math.min(A, buf.length - off);
+      const data = new Float32Array(num * chCount);
+      for (let c = 0; c < chCount; c++) data.set(chans[c].subarray(off, off + num), c * num);
+      const ad = new AudioData({ format: "f32-planar", sampleRate, numberOfFrames: num, numberOfChannels: chCount, timestamp: Math.round((off / sampleRate) * 1e6), data });
+      aEnc.encode(ad); ad.close();
+    }
+
+    // render + encode video frames deterministically
+    if (progressCb) progressCb(0, totalFrames);
+    for (let N = 0; N < totalFrames; N++) {
+      const t = N / fps;
+      const { mags, bass } = offlineFrame(frequencyAt, t, state.detail, smoothArr);
+      drawScene(state.rotate ? t : 0, mags, bass);
+      const frame = new VideoFrame(canvas, { timestamp: Math.round((N * 1e6) / fps), duration: Math.round(1e6 / fps) });
+      vEnc.encode(frame, { keyFrame: N % (fps * 2) === 0 });
+      frame.close();
+      while (vEnc.encodeQueueSize > 8) await nextTick(); // backpressure (not throttled when hidden)
+      if (N % 5 === 0) { if (progressCb) progressCb(N, totalFrames); await nextTick(); }
+    }
+    await vEnc.flush(); await aEnc.flush(); muxer.finalize();
+    return { blob: new Blob([target.buffer], { type: mime }), ext };
+  }
+
+  async function fastExport() {
+    if (exporting || batchRunning) return;
+    const buf = await ensureAudioBuffer();
+    if (!buf) { showToast("Add an audio clip first"); return; }
+    showToast(state.downloadMode !== "browser"
+      ? "Exporting silently — return to this tab when done to confirm the save dialog"
+      : "Exporting silently — you can switch tabs; it keeps running in the background");
     exporting = true;
     try {
-      const target = new MuxerNS.ArrayBufferTarget();
-      const muxer = new MuxerNS.Muxer({
-        target,
-        video: { codec: mvCodec, width: W, height: H, frameRate: fps },
-        audio: { codec: maCodec, numberOfChannels: chCount, sampleRate },
-        firstTimestampBehavior: "offset",
-        fastStart: ext === "mp4" ? "in-memory" : undefined,
-      });
-      const vEnc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => console.error("video", e) });
-      vEnc.configure(Object.assign({ codec: vCodec, width: W, height: H, bitrate: 12e6, framerate: fps }, avcOpt));
-      const aEnc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => console.error("audio", e) });
-      aEnc.configure({ codec: aCodec, sampleRate, numberOfChannels: chCount, bitrate: 192000 });
-
-      // encode audio (planar f32 in chunks)
-      const chans = []; for (let c = 0; c < chCount; c++) chans.push(buf.getChannelData(c));
-      const A = 4096;
-      for (let off = 0; off < buf.length; off += A) {
-        const num = Math.min(A, buf.length - off);
-        const data = new Float32Array(num * chCount);
-        for (let c = 0; c < chCount; c++) data.set(chans[c].subarray(off, off + num), c * num);
-        const ad = new AudioData({ format: "f32-planar", sampleRate, numberOfFrames: num, numberOfChannels: chCount, timestamp: Math.round((off / sampleRate) * 1e6), data });
-        aEnc.encode(ad); ad.close();
-      }
-
-      // render + encode video frames deterministically
-      showExportProgress(0, totalFrames);
-      for (let N = 0; N < totalFrames; N++) {
-        const t = N / fps;
-        const { mags, bass } = offlineFrame(frequencyAt, t, state.detail, smoothArr);
-        drawScene(state.rotate ? t : 0, mags, bass);
-        const frame = new VideoFrame(canvas, { timestamp: Math.round((N * 1e6) / fps), duration: Math.round(1e6 / fps) });
-        vEnc.encode(frame, { keyFrame: N % (fps * 2) === 0 });
-        frame.close();
-        while (vEnc.encodeQueueSize > 8) await nextTick(); // backpressure (not throttled when hidden)
-        if (N % 5 === 0) { showExportProgress(N, totalFrames); await nextTick(); }
-      }
-      await vEnc.flush(); await aEnc.flush(); muxer.finalize();
-      const blob = new Blob([target.buffer], { type: mime });
+      const { blob, ext } = await encodeClip(buf, (d, t) => showExportProgress(d, t));
+      if (state.videoFormat === "mp4" && ext !== "mp4") showToast("MP4 unavailable here — exported WebM");
       const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
       await saveBlob(blob, "visualizer-" + ts + "." + ext);
     } catch (e) {
-      console.error(e); showToast("Export failed: " + e.message);
+      console.error(e); showToast(e && e.message === "no-muxer" ? "Fast export unavailable here" : "Export failed: " + e.message);
     } finally {
       exporting = false; hideExportProgress(); setPlayIcon(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Batch queue — up to 10 audio files, each with an optional paired background
+  // image; batch export renders one video per item via the offline encoder.
+  // ---------------------------------------------------------------------------
+  const BATCH_MAX = 10;
+  function baseName(name) { return String(name).replace(/\.[^.]+$/, ""); }
+  function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  function decodeAudioFile(file) {
+    ensureAudioGraph();
+    return file.arrayBuffer().then((ab) => audioCtx.decodeAudioData(ab));
+  }
+
+  function renderBatchList() {
+    if (!batchListEl) return;
+    if (!batchQueue.length) {
+      batchListEl.innerHTML = '<div class="batch-empty">No files queued.</div>';
+    } else {
+      batchListEl.innerHTML = "";
+      batchQueue.forEach((it, i) => {
+        const row = document.createElement("div");
+        row.className = "batch-row";
+        row.innerHTML =
+          '<span class="batch-idx">' + (i + 1) + "</span>" +
+          '<span class="batch-names"><b>' + escapeHtml(it.audioName) + "</b>" +
+          (it.imageName
+            ? ' <span class="batch-img">+ ' + escapeHtml(it.imageName) + "</span>"
+            : ' <span class="batch-img dim">· current background</span>') +
+          "</span>";
+        const rm = document.createElement("button");
+        rm.className = "batch-x"; rm.textContent = "✕"; rm.title = "Remove";
+        rm.addEventListener("click", () => { batchQueue.splice(i, 1); renderBatchList(); });
+        row.appendChild(rm);
+        batchListEl.appendChild(row);
+      });
+    }
+    batchExportBtn.disabled = batchQueue.length === 0 || batchRunning;
+    batchExportBtn.textContent = batchQueue.length > 1
+      ? "Batch export " + batchQueue.length + " videos"
+      : (batchQueue.length === 1 ? "Export 1 video" : "Batch export");
+  }
+
+  async function saveBatchBlob(blob, name) {
+    if (dirHandle && (await ensureDirPermission())) {
+      const fh = await dirHandle.getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      await w.write(blob); await w.close();
+      return true;
+    }
+    anchorDownload(blob, name);
+    return false;
+  }
+
+  function showBatchProgress(label, done, total) {
+    recDot.classList.add("show"); recDot.classList.remove("paused");
+    recLabel.textContent = "BATCH";
+    recProgress.classList.add("show");
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    recTime.textContent = label + " — " + pct + "%";
+    recBarFill.style.width = pct + "%";
+  }
+
+  async function batchExport() {
+    if (exporting || batchRunning) return;
+    if (!batchQueue.length) { showToast("Add audio files to the batch first"); return; }
+    if (!fastSupported()) { showToast("Batch export needs a Chromium browser (WebCodecs)"); return; }
+    if (!dirHandle) showToast("No folder chosen — each video will download individually");
+    batchRunning = true; exporting = true;
+    renderBatchList();
+    const saved = { bgSource: state.bgSource, fxSource: state.fxSource };
+    const savedBgImg = bgImg;
+    let done = 0;
+    try {
+      for (let i = 0; i < batchQueue.length; i++) {
+        const it = batchQueue[i];
+        let buf;
+        try { buf = await decodeAudioFile(it.audioFile); }
+        catch (e) { showToast("Skipped " + it.audioName + " (decode failed)"); continue; }
+        // background for this item: its paired image, else whatever was set before
+        if (it.image) { bgImg = it.image; state.bgSource = "image"; }
+        else { bgImg = savedBgImg; state.bgSource = saved.bgSource; }
+        state.fxSource = null; // offline overlay video is not supported
+        const label = "Batch " + (i + 1) + "/" + batchQueue.length + ": " + it.audioName;
+        const { blob, ext } = await encodeClip(buf, (d, t) => showBatchProgress(label, d, t));
+        await saveBatchBlob(blob, baseName(it.audioName) + "-vid." + ext);
+        done++;
+      }
+      showToast("Batch complete — " + done + "/" + batchQueue.length + " videos" + (dirHandle ? " → " + dirHandle.name : ""));
+    } catch (e) {
+      console.error(e); showToast("Batch failed: " + e.message);
+    } finally {
+      state.bgSource = saved.bgSource; state.fxSource = saved.fxSource; bgImg = savedBgImg;
+      exporting = false; batchRunning = false; hideExportProgress();
+      renderBatchList();
     }
   }
 
@@ -2083,6 +2256,36 @@
     };
     reader.readAsText(f);
   });
+
+  // ---- Batch queue controls ----
+  batchAudioInput.addEventListener("change", () => {
+    for (const f of batchAudioInput.files) {
+      if (batchQueue.length >= BATCH_MAX) { showToast("Batch is full (max " + BATCH_MAX + ")"); break; }
+      batchQueue.push({ audioFile: f, audioName: f.name, image: null, imageName: "" });
+    }
+    batchAudioInput.value = "";
+    renderBatchList();
+  });
+  batchImageInput.addEventListener("change", async () => {
+    if (!batchQueue.length) { showToast("Add audio files first, then their images"); batchImageInput.value = ""; return; }
+    const files = [...batchImageInput.files];
+    let fi = 0;
+    for (let i = 0; i < batchQueue.length && fi < files.length; i++) {
+      if (batchQueue[i].image) continue;         // fill items that don't have an image yet
+      const f = files[fi++];
+      batchQueue[i].imageName = f.name;
+      batchQueue[i].image = await loadImage(URL.createObjectURL(f));
+    }
+    batchImageInput.value = "";
+    renderBatchList();
+  });
+  batchFolderBtn.addEventListener("click", async () => {
+    await chooseFolder();
+    if (dirHandle) batchFolderName.textContent = dirHandle.name;
+  });
+  batchClearBtn.addEventListener("click", () => { batchQueue = []; renderBatchList(); });
+  batchExportBtn.addEventListener("click", batchExport);
+
   rotateToggle.addEventListener("change", () => { state.rotate = rotateToggle.checked; saveState(); });
   vignetteToggle.addEventListener("change", () => { state.vignette = vignetteToggle.checked; saveState(); });
   vignetteStrengthEl.addEventListener("input", () => {
@@ -2395,6 +2598,32 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Collapsible settings — wrap each section body and make headers toggle it,
+  // so the panel reads as tidy menus instead of one long scroll.
+  // ---------------------------------------------------------------------------
+  function initCollapsibleSections() {
+    const body = document.querySelector(".panel-body");
+    if (!body) return;
+    body.querySelectorAll(":scope > .section").forEach((sec, i) => {
+      const title = sec.querySelector(":scope > .section-title");
+      if (!title) return;
+      const bodyWrap = document.createElement("div");
+      bodyWrap.className = "section-body";
+      while (title.nextSibling) bodyWrap.appendChild(title.nextSibling);
+      sec.appendChild(bodyWrap);
+      title.classList.add("section-head");
+      const caret = document.createElement("span");
+      caret.className = "caret"; caret.textContent = "▸";
+      title.appendChild(caret);
+      sec.classList.add("collapsible", "collapsed");
+      title.addEventListener("click", () => sec.classList.toggle("collapsed"));
+    });
+    // open the first section (Media) by default
+    const first = body.querySelector(":scope > .section.collapsible");
+    if (first) first.classList.remove("collapsed");
+  }
+
+  // ---------------------------------------------------------------------------
   // Init
   // ---------------------------------------------------------------------------
   loadState();
@@ -2402,7 +2631,9 @@
   buildBgPresets();
   applyStateToUI();
   refreshPresetList();
+  renderBatchList();
   initSnapping();
+  initCollapsibleSections();
   restoreDirHandle();
   render();
 })();

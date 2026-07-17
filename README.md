@@ -19,7 +19,9 @@ Everything the video shows is drawn on one `<canvas>`; the on-screen controls si
   - **On-screen recording progress** and a **3-2-1 countdown** — both helpers are excluded from the video.
   - **⚡ Fast export** — render the whole clip **offline, faster than real-time** (no waiting the full duration); the file still plays at normal **1× length**. It is **silent** (nothing plays through your speakers) and **keeps running in a background tab**, so you can start it and go back to other tabs / Spotify. Uses WebCodecs + an inlined muxer; works with **still backgrounds** (image/preset) in Chromium browsers, and falls back to real-time recording when a background/overlay video is in use or WebCodecs is unavailable.
   - **Mute audio while recording** — a toggle so real-time recording doesn't play through your speakers (the file still gets the audio). Only your loaded clip is ever recorded — other tabs (e.g. Spotify) are never captured, since audio is tapped in-page, not via screen/tab capture.
+- **Batch queue** — queue up to **10 audio files**, each optionally paired (in order) with a **background image**; one click renders a video for every item via the offline engine and saves each as **`<audio>-vid`** to a chosen folder (or downloads them). Silent and runs in the background.
 - **Look presets** — save/load named looks, and export/import all settings as a `.json` file.
+- **Tidy settings** — the settings panel is organized into **collapsible sections** (menus) so it stays clean instead of one long scroll.
 - **Persistence** — background, profile, and all appearance settings are remembered across reloads (via `localStorage`).
 - **Lightweight when idle/backgrounded** — the render loop is frame-rate capped (throttled further when idle), and the background video is paused while the tab is hidden, so the tool stays easy on your CPU/GPU and doesn't bog down other tabs.
 
@@ -54,6 +56,7 @@ That's it.
 - **Progress readout** and the **3-2-1 countdown** are on-screen helpers only — they're never in the recording. Both can be toggled off.
 - **Look presets:** save a named look and reload it later, or **Export/Import** all settings as a `.json` file to move them between machines.
 - **Fast export** (Settings → Recording → *⚡ Fast export*) renders offline as fast as your machine can encode and outputs a correct-length 1× file. MP4 fast-export needs the browser's AAC encoder (recent Chrome/Edge); where that isn't available it exports **WebM (VP9/Opus)**. It uses the MIT-licensed [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer) and [`webm-muxer`](https://github.com/Vanilagy/webm-muxer), inlined into `index.html`.
+- **Batch export** (Settings → Batch queue): add your audio files (up to 10), then add background images in the same order so item 1 pairs with image 1, etc. Optionally pick a **Save folder**, then hit **Batch export** — it renders each file with your current look and saves them as `<audio>-vid.<ext>`. Same offline engine, so it's silent and keeps going in the background. (Items without a paired image use whatever background is currently set.)
 
 ### Editor compatibility (DaVinci Resolve, etc.)
 
