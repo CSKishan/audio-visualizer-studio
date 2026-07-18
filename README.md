@@ -1,3 +1,5 @@
+<img src="icon.svg" width="84" alt="Audio Visualizer Studio icon" />
+
 # Audio Visualizer Studio
 
 A single-file, browser-based audio visualizer for creating background videos for music, podcasts, and audio clips. Drop in an audio file, a background, and a profile picture, choose a look, and record a clean **1080p** video — no install, no build step, no server.
@@ -19,7 +21,10 @@ Everything the video shows is drawn on one `<canvas>`; the on-screen controls si
   - **On-screen recording progress** and a **3-2-1 countdown** — both helpers are excluded from the video.
   - **⚡ Fast export** — render the whole clip **offline, faster than real-time** (no waiting the full duration); the file still plays at normal **1× length**. It is **silent** (nothing plays through your speakers) and **keeps running in a background tab**, so you can start it and go back to other tabs / Spotify. Uses WebCodecs + an inlined muxer; works with **still backgrounds** (image/preset) in Chromium browsers, and falls back to real-time recording when a background/overlay video is in use or WebCodecs is unavailable.
   - **Mute audio while recording** — a toggle so real-time recording doesn't play through your speakers (the file still gets the audio). Only your loaded clip is ever recorded — other tabs (e.g. Spotify) are never captured, since audio is tapped in-page, not via screen/tab capture.
-- **Batch queue** — queue up to **10 audio files**, each optionally paired (in order) with a **background image**; one click renders a video for every item via the offline engine and saves each as **`<audio>-vid`** to a chosen folder (or downloads them). Silent and runs in the background.
+- **Batch queue** — queue up to **10 audio files** and render a video for each in one click, saved as **`<audio>-vid`** to a chosen folder (or downloaded).
+  - **Per-item backgrounds** — click any row to set that item's background individually: **Current / Image / Preset**, plus its own **blur** and **zoom**. (Bulk-adding images still pairs them in order as a shortcut.)
+  - **Fast or Normal** — *Fast* uses the offline engine (much quicker, silent, runs in a background tab, still backgrounds only); turn it off for *Normal* real-time recording, which supports background/overlay **video** but takes the full duration and needs the tab in front.
+  - **Pause / resume / stop** — while a batch runs, the pause button pauses and resumes it, and the record button stops it.
 - **Look presets** — save/load named looks, and export/import all settings as a `.json` file.
 - **Tidy settings** — the settings panel is organized into **collapsible sections** (menus) so it stays clean instead of one long scroll.
 - **Persistence** — background, profile, and all appearance settings are remembered across reloads (via `localStorage`).
@@ -56,7 +61,10 @@ That's it.
 - **Progress readout** and the **3-2-1 countdown** are on-screen helpers only — they're never in the recording. Both can be toggled off.
 - **Look presets:** save a named look and reload it later, or **Export/Import** all settings as a `.json` file to move them between machines.
 - **Fast export** (Settings → Recording → *⚡ Fast export*) renders offline as fast as your machine can encode and outputs a correct-length 1× file. MP4 fast-export needs the browser's AAC encoder (recent Chrome/Edge); where that isn't available it exports **WebM (VP9/Opus)**. It uses the MIT-licensed [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer) and [`webm-muxer`](https://github.com/Vanilagy/webm-muxer), inlined into `index.html`.
-- **Batch export** (Settings → Batch queue): add your audio files (up to 10), then add background images in the same order so item 1 pairs with image 1, etc. Optionally pick a **Save folder**, then hit **Batch export** — it renders each file with your current look and saves them as `<audio>-vid.<ext>`. Same offline engine, so it's silent and keeps going in the background. (Items without a paired image use whatever background is currently set.)
+- **Batch export** (Settings → Batch queue): add your audio files (up to 10), optionally bulk-add background images (paired in order), then hit **Batch export** — each file renders with your current look and saves as `<audio>-vid.<ext>` to your chosen **Save folder** (or downloads).
+  - **Fine-tune per item:** click a queued row to expand it and choose that item's background (**Current / Image / Preset**) plus its own **blur** and **zoom** — so every video in the batch can look different.
+  - **Fast vs Normal:** *⚡ Fast export* (default) renders offline — much faster than real time, silent, and keeps running in a background tab, but can't include a background/overlay video. Switch it off for **Normal** real-time recording, which does support video layers but takes the full duration and needs the tab in front.
+  - **Control a running batch:** the **pause** button pauses/resumes it (progress freezes exactly where it is) and the **record** button stops it; anything already finished is kept.
 
 ### Editor compatibility (DaVinci Resolve, etc.)
 
